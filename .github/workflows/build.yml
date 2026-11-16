@@ -37,8 +37,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - name: Build runtime jar
-        run: bash tools/build_runtime.sh
+      - name: Build runtime jar, copy VM sources into the iOS project
+        run: bash tools/prepare_ios.sh
       - name: Generate Xcode project
         run: |
           brew install xcodegen

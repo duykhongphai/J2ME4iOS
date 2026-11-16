@@ -9,3 +9,7 @@ platform/ios/Info.plist
 
 .DS_Store
 xcuserdata/
+
+# copied by tools/prepare_ios.sh
+platform/ios/Core/
+platform/ios/Bundle/

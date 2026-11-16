@@ -30,7 +30,7 @@ Trình chạy game J2ME (MIDP 2.0 / CLDC 1.1) cho iOS, viết từ đầu:
 Nếu có máy Mac thì build trực tiếp:
 
 ```bash
-bash tools/build_runtime.sh
+bash tools/prepare_ios.sh
 ```
 
 ```bash
