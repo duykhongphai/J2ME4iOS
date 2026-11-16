@@ -18,21 +18,21 @@ typedef struct FreeBlock {
     struct FreeBlock *next;
 } FreeBlock;
 
-static uint8_t *heap_base, *heap_end, *heap_top;
-static uint8_t *start_bits;
-static FreeBlock *small_lists[NSMALL];
-static FreeBlock *large_list;
-static size_t used_bytes, alloc_since_gc, gc_threshold, heap_size;
-static void *stack_base;
-static uint32_t hash_seed = 0x9E3779B9u;
+static J4I_TLS uint8_t *heap_base, *heap_end, *heap_top;
+static J4I_TLS uint8_t *start_bits;
+static J4I_TLS FreeBlock *small_lists[NSMALL];
+static J4I_TLS FreeBlock *large_list;
+static J4I_TLS size_t used_bytes, alloc_since_gc, gc_threshold, heap_size;
+static J4I_TLS void *stack_base;
+static J4I_TLS uint32_t hash_seed = 0x9E3779B9u;
 
-static Object ***extra_roots;
-static int n_extra_roots, cap_extra_roots;
+static J4I_TLS Object ***extra_roots;
+static J4I_TLS int n_extra_roots, cap_extra_roots;
 
-static Object **mark_stack;
-static size_t mark_sp, mark_cap;
+static J4I_TLS Object **mark_stack;
+static J4I_TLS size_t mark_sp, mark_cap;
 
-static Object *oom_error;
+static J4I_TLS Object *oom_error;
 
 static inline void bit_set(size_t i) { start_bits[i >> 3] |= (uint8_t)(1u << (i & 7)); }
 static inline void bit_clr(size_t i) { start_bits[i >> 3] &= (uint8_t)~(1u << (i & 7)); }
@@ -238,8 +238,8 @@ uint32_t obj_identity_hash(Object *o) {
 }
 
 /* ---------------- interned strings ---------------- */
-static Object **intern_tab;
-static int intern_size, intern_count;
+static J4I_TLS Object **intern_tab;
+static J4I_TLS int intern_size, intern_count;
 
 /* ---------------- marking ---------------- */
 static inline void mark_push(Object *o) {

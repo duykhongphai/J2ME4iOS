@@ -9,7 +9,7 @@
 #define S4(p) ((int32_t)(((uint32_t)(p)[0] << 24) | ((uint32_t)(p)[1] << 16) | ((uint32_t)(p)[2] << 8) | (uint32_t)(p)[3]))
 
 /* ---------------- exceptions ---------------- */
-static int exc_depth;
+static J4I_TLS int exc_depth;
 
 Object *exception_new(Thread *t, const char *cls, const char *msg) {
     if (exc_depth > 2) vm_fatal("recursive exception creating %s (%s)", cls, msg ? msg : "");

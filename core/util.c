@@ -9,7 +9,7 @@ typedef struct Chunk {
     _Alignas(16) unsigned char data[];
 } Chunk;
 
-static Chunk *chunks;
+static J4I_TLS Chunk *chunks;
 #define CHUNK_SIZE (256 * 1024)
 
 void *meta_alloc(size_t n) {
@@ -50,8 +50,8 @@ void meta_free_all(void) {
 }
 
 /* ---------------- symbols ---------------- */
-static Symbol **sym_tab;
-static int sym_tab_size, sym_count;
+static J4I_TLS Symbol **sym_tab;
+static J4I_TLS int sym_tab_size, sym_count;
 
 static uint32_t hash_bytes(const char *s, size_t len) {
     uint32_t h = 2166136261u;
@@ -112,7 +112,7 @@ void vm_log(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
-    if (vm.cfg.host.log) vm.cfg.host.log(vm.cfg.host.user, buf);
+    if (vm_ptr && vm.cfg.host.log) vm.cfg.host.log(vm.cfg.host.user, buf);
     else fprintf(stderr, "%s\n", buf);
 }
 

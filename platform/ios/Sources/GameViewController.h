@@ -1,6 +1,15 @@
 #import <UIKit/UIKit.h>
 
-/// Runs one MIDlet suite. Only one game can run at a time (the VM is a singleton).
+@class GameSession;
+
+/// Shows one running GameSession: screen, keypad, controllers and the in-game menu.
+/// Dismissing it leaves the session running in the background.
 @interface GameViewController : UIViewController
-- (instancetype)initWithJarPath:(NSString *)path width:(int)w height:(int)h;
+- (instancetype)initWithSession:(GameSession *)session;
+@property (nonatomic, readonly) GameSession *session;
+
+/* called by GameSession on the main thread */
+- (void)sessionFrameReady;
+- (void)sessionExited;
+- (void)askText:(int)reqId title:(NSString *)title text:(NSString *)text maxLen:(int)maxLen constraints:(int)constraints;
 @end

@@ -44,7 +44,7 @@ typedef struct Monitor {
 } Monitor;
 
 #define MON_BUCKETS 1024
-static Monitor *mon_tab[MON_BUCKETS];
+static J4I_TLS Monitor *mon_tab[MON_BUCKETS];
 
 static inline unsigned mon_hash(Object *o) { return (unsigned)(((uintptr_t)o >> 4) * 2654435761u) & (MON_BUCKETS - 1); }
 
@@ -147,50 +147,51 @@ static bool try_reacquire(Thread *t) {
     return true;
 }
 
-/* ---------------- host events ---------------- */
-#define EVQ 512
-static int evq[EVQ][3];
-static int ev_head, ev_tail;
-
-void j4i_post_event(int type, int a, int b) {
+/* ---------------- host events (per instance, posted from any thread) ---------------- */
+void j4i_instance_post_event(J4IInstance *in, int type, int a, int b) {
+    if (!in) return;
     os_lock();
-    int next = (ev_tail + 1) % EVQ;
+    int next = (in->ev_tail + 1) % EVQ;
     /* coalesce pointer drags when the queue is backing up */
-    if (type == J4I_EV_POINTER_DRAGGED && ev_tail != ev_head) {
-        int last = (ev_tail + EVQ - 1) % EVQ;
-        if (evq[last][0] == J4I_EV_POINTER_DRAGGED) {
-            evq[last][1] = a;
-            evq[last][2] = b;
+    if (type == J4I_EV_POINTER_DRAGGED && in->ev_tail != in->ev_head) {
+        int last = (in->ev_tail + EVQ - 1) % EVQ;
+        if (in->evq[last][0] == J4I_EV_POINTER_DRAGGED) {
+            in->evq[last][1] = a;
+            in->evq[last][2] = b;
             os_cond_signal();
             os_unlock();
             return;
         }
     }
-    if (next != ev_head) {
-        evq[ev_tail][0] = type;
-        evq[ev_tail][1] = a;
-        evq[ev_tail][2] = b;
-        ev_tail = next;
+    if (next != in->ev_head) {
+        in->evq[in->ev_tail][0] = type;
+        in->evq[in->ev_tail][1] = a;
+        in->evq[in->ev_tail][2] = b;
+        in->ev_tail = next;
     }
     os_cond_signal();
     os_unlock();
 }
 
-static volatile int64_t force_exit_at;
-
-void j4i_request_exit(void) {
-    force_exit_at = os_mono_ms() + 1500;
-    j4i_post_event(J4I_EV_EXIT, 0, 0);
+void j4i_instance_request_exit(J4IInstance *in) {
+    if (!in) return;
+    in->force_exit_at = os_mono_ms() + 1500;
+    j4i_instance_post_event(in, J4I_EV_EXIT, 0, 0);
 }
+
+void j4i_post_event(int type, int a, int b) { j4i_instance_post_event(vm_default_instance(), type, a, b); }
+
+void j4i_request_exit(void) { j4i_instance_request_exit(vm_default_instance()); }
 
 bool events_pop(int *ev) {
     bool r = false;
+    J4IInstance *in = INST;
     os_lock();
-    if (ev_head != ev_tail) {
-        ev[0] = evq[ev_head][0];
-        ev[1] = evq[ev_head][1];
-        ev[2] = evq[ev_head][2];
-        ev_head = (ev_head + 1) % EVQ;
+    if (in->ev_head != in->ev_tail) {
+        ev[0] = in->evq[in->ev_head][0];
+        ev[1] = in->evq[in->ev_head][1];
+        ev[2] = in->evq[in->ev_head][2];
+        in->ev_head = (in->ev_head + 1) % EVQ;
         r = true;
     }
     os_unlock();
@@ -199,14 +200,14 @@ bool events_pop(int *ev) {
 
 bool events_pending(void) {
     os_lock();
-    bool r = ev_head != ev_tail;
+    bool r = INST->ev_head != INST->ev_tail;
     os_unlock();
     return r;
 }
 
 void events_reset(void) {
     os_lock();
-    ev_head = ev_tail = 0;
+    INST->ev_head = INST->ev_tail = 0;
     os_unlock();
 }
 
@@ -217,13 +218,13 @@ static void deliver_interrupt(Thread *t) {
 }
 
 void sched_loop(void) {
-    force_exit_at = 0;
+    INST->force_exit_at = 0;
     while (!vm.exit_requested) {
         int64_t now = vm_now();
         int64_t next_wake = INT64_MAX;
-        if (force_exit_at) {
-            if (now >= force_exit_at) { vm.exit_requested = 1; break; }
-            next_wake = force_exit_at;
+        if (INST->force_exit_at) {
+            if (now >= INST->force_exit_at) { vm.exit_requested = 1; break; }
+            next_wake = INST->force_exit_at;
         }
         bool ev_pending = events_pending();
         Thread *run = NULL;
@@ -278,7 +279,7 @@ void sched_loop(void) {
         }
         if (!any_alive || !vm.threads) break;
         os_lock();
-        bool pending = ev_head != ev_tail;
+        bool pending = INST->ev_head != INST->ev_tail;
         if (!pending && !vm.exit_requested) {
             int timeout = -1;
             if (next_wake != INT64_MAX) {

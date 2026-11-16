@@ -41,17 +41,61 @@ Sau đó chọn Team ký ứng dụng trong Xcode và bấm Run.
 
 ## Dùng app trên iPhone
 
-- **Nhập game:** bấm **+** để chọn file `.jar`, hoặc chép `.jar` vào thư mục *J2ME4iOS* trong app **Tệp (Files)**, hoặc dùng "Mở bằng" từ app khác.
-- **Chạm vào game** để chơi hoặc chỉnh riêng cho từng game:
-  - độ phân giải (mặc định 240x320),
-  - hướng màn hình: tự động / dọc / ngang,
-  - kiểu phóng to: vừa khung / số nguyên (nét nhất) / kéo giãn,
-  - ẩn bàn phím ảo (cho game cảm ứng),
-  - xoá dữ liệu lưu.
-- **Bàn phím ảo:** phím mềm trái/phải, D-pad, OK, 0–9, `*`, `#`, `C`. Có thể chạm trực tiếp lên màn hình game. Hỗ trợ bàn phím rời: phím mũi tên, Enter, số, F1/F2 (phím mềm).
-- **Nút `☰`** mở menu trong game: thoát, ẩn/hiện bàn phím, đổi kiểu phóng to, bật/tắt làm mịn ảnh. Khi ẩn bàn phím, nút `☰` nằm ở góc trên bên phải.
-- **Nhạc MIDI:** iOS cần soundfont. Chép một file `.sf2` hoặc `.dls` (ví dụ GeneralUser GS) vào thư mục J2ME4iOS trong app Tệp. Âm thanh WAV/MP3 chạy được ngay.
-- **Dữ liệu lưu (RecordStore)** nằm trong `Library/Application Support/RMS/<tên jar>/`.
+- **Nhập game:** có ba cách:
+  - bấm **+** để chọn file `.jar` (chọn kèm `.jad` nếu game có);
+  - chép file vào thư mục *J2ME4iOS* trong app **Tệp (Files)**;
+  - dùng "Mở bằng" từ app khác.
+
+  File `.jad` được nhận ra khi trùng tên với `.jar`, hoặc khi dòng `MIDlet-Jar-URL` trong JAD trỏ đến file `.jar` đó.
+- **Chạm vào game** để mở menu: chơi, **Cài đặt game…**, đổi tên, xoá dữ liệu lưu.
+- **Cài đặt game** (lưu riêng cho từng game):
+  - **Màn hình:**
+    - độ phân giải (có thể nhập tuỳ ý);
+    - hướng màn hình;
+    - kiểu phóng to: vừa khung / số nguyên / kéo giãn / gốc 1×;
+    - làm mịn ảnh, màu nền, hiện FPS.
+  - **Bàn phím:**
+    - hiện / ẩn / tự động (ẩn khi có tay cầm hoặc bàn phím rời);
+    - kiểu điện thoại hoặc kiểu tay cầm (cần 8 hướng);
+    - độ đậm phím khi xoay ngang, rung nhẹ khi bấm.
+  - **Chữ:** cỡ chữ nhỏ / vừa / lớn, bật/tắt khử răng cưa.
+  - **Hệ thống:** tên máy giả lập (`microedition.platform`, ví dụ Nokia, Sony Ericsson, Samsung) và thuộc tính hệ thống thêm (`key=value; key2=value2`).
+- **Bàn phím ảo:**
+  - Có thể trượt ngón tay giữa các phím: phím cũ tự nhả, phím mới được bấm.
+  - Kiểu tay cầm có cần điều khiển 8 hướng (nghiêng chéo sẽ bấm 2 phím mũi tên cùng lúc).
+  - Có thể chạm trực tiếp lên màn hình game.
+- **Bàn phím rời:**
+  - mũi tên; Enter/Space = OK; Q/F1 và W/F2 = phím mềm;
+  - 0–9; E = `*`; R = `#`; Backspace = C;
+  - Esc hoặc M mở menu.
+- **Tay cầm** (MFi, Xbox, PlayStation):
+  - D-pad / cần trái = mũi tên; cần phải = 2/4/6/8;
+  - nút Home mở menu;
+  - các nút còn lại đổi được trong **⚙︎ Cài đặt** ở màn hình danh sách game.
+- **Nút `☰`** mở menu trong game:
+  - ẩn/hiện bàn phím, đổi kiểu bàn phím;
+  - kiểu phóng to, làm mịn ảnh;
+  - âm lượng, FPS;
+  - **Xem log** (chép/chia sẻ khi báo lỗi);
+  - thoát.
+- **Nhạc MIDI:**
+  - Mặc định phát bằng bộ tổng hợp tích hợp, không cần cài thêm gì.
+  - Nếu chép một soundfont `.sf2`/`.dls` (ví dụ GeneralUser GS) vào thư mục J2ME4iOS, chế độ "Tự động" sẽ dùng soundfont cho tiếng hay hơn.
+  - Đổi chế độ trong **⚙︎ Cài đặt**.
+- **Nhiều game cùng lúc:**
+  - Menu `☰` → **Về danh sách (game vẫn chạy)**: game tiếp tục chạy nền (giữ kết nối mạng). Mục **Đang chạy** ở đầu danh sách để quay lại.
+  - **Chuyển sang game khác…** đổi thẳng giữa các game đang chạy.
+  - Mỗi game là một máy ảo riêng, chiếm khoảng 64 MB bộ nhớ; app cảnh báo khi mở quá 4 game.
+  - Mặc định chỉ game đang hiện mới có tiếng. Đổi trong **⚙︎ Cài đặt → Game chạy nền vẫn phát tiếng**.
+- **Khe lưu:**
+  - Mỗi game có 5 khe lưu, mỗi khe có RecordStore và file riêng (ví dụ mỗi khe một tài khoản).
+  - Chọn khe qua **Chơi ở khe lưu khác…**; có thể chạy nhiều khe của cùng một game cùng lúc.
+  - Khe 1 là dữ liệu lưu gốc của game.
+- **Proxy theo khe:** trong **Cài đặt game → Mạng**, mỗi khe có thể có proxy riêng. Mọi kết nối socket và HTTP của game ở khe đó sẽ đi qua proxy này. Các dạng hỗ trợ:
+  - `socks5://user:pass@host:port`,
+  - `socks5h://...` (proxy tự phân giải tên miền),
+  - `http://host:port` (HTTP CONNECT).
+- **Dữ liệu lưu** nằm trong `Library/Application Support/RMS/<tên jar>/`. Khe 2–5 nằm ở `<tên jar>#2` … `<tên jar>#5`.
 
 ## Build và test trên Windows
 
@@ -66,7 +110,15 @@ build\j4i.exe path\to\game.jar
 ```
 
 - **Phím:** mũi tên; Enter/Space = OK; F1/Q = phím mềm trái; F2/W = phím mềm phải; 0–9; E = `*`; R = `#`; Backspace = C; F12 = chụp màn hình.
-- **Tuỳ chọn:** `--size 176x208`, `--heap 64`, `--trace 1` (in log GC/exception), `--trace 2` (log nạp class).
+- **Tuỳ chọn:**
+  - `--size 176x208`, `--heap 64`;
+  - `--trace 1` (in log GC/exception), `--trace 2` (log nạp class);
+  - `--jad game.jad`, `--prop microedition.platform=SonyEricssonK800i` (dùng được nhiều lần);
+  - `--font 10,13,18` (cỡ chữ nhỏ, vừa, lớn), `--no-aa` (tắt khử răng cưa chữ);
+  - `--host-midi` (tắt bộ tổng hợp MIDI tích hợp);
+  - `--proxy socks5://user:pass@host:port` (cũng nhận `socks5h://` và `http://`).
+- **Nhiều máy ảo cùng lúc** (bản `j4i-headless`): `--instances 4 --log-prefix out` chạy 4 máy ảo song song, mỗi máy ghi log vào `out.N.txt` và lưu dữ liệu vào `<data>/slotN`.
+- **Âm thanh trên Windows:** chỉ phát một âm thanh tại một thời điểm (WAV, hoặc MIDI qua bộ tổng hợp), đủ để thử game.
 
 Chạy không cửa sổ, có kịch bản phím và chụp màn hình (thời gian tính bằng mili giây):
 
@@ -82,6 +134,10 @@ bash tests/run_lang_test.sh
 
 ```bash
 bash tests/run_io_test.sh
+```
+
+```bash
+bash tests/run_multi_test.sh
 ```
 
 ```bash
@@ -116,7 +172,7 @@ build\j4i.exe build\tests\testmidlet.jar
   - **Mascot Capsule v3** (`com.mascotcapsule.micro3d.v3`): đọc model MBAC, animation MTRA, texture BMP 8-bit; xương, pattern, ánh sáng, toon shading, các chế độ trong suốt, `renderPrimitives`, `drawCommandList`.
   - Cả hai dùng chung bộ dựng hình phần mềm viết bằng C (`core/m3g.c`).
 - **Âm thanh:**
-  - `Manager`/`Player` cho WAV, MP3, MIDI.
+  - `Manager`/`Player` cho WAV, MP3, MIDI. MIDI phát bằng bộ tổng hợp General MIDI tích hợp (`core/midi.c`), không cần soundfont.
   - Chuỗi tone (`ToneControl`, file `.jts`) và `Manager.playTone`.
   - Nhạc chuông Nokia (`Sound` dạng `FORMAT_TONE`/OTT).
 - **Lưu trữ:**

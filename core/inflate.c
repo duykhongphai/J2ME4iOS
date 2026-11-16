@@ -117,8 +117,8 @@ static void stored(Inf *s) {
 }
 
 static void fixed(Inf *s) {
-    static Huff lc, dc;
-    static int built;
+    static J4I_TLS Huff lc, dc;
+    static J4I_TLS int built;
     if (!built) {
         uint8_t l[288];
         int i;

@@ -12,8 +12,8 @@ typedef struct NativeEntry {
     NativeFn fn;
 } NativeEntry;
 
-static NativeEntry *natives;
-static int n_natives, cap_natives;
+static J4I_TLS NativeEntry *natives;
+static J4I_TLS int n_natives, cap_natives;
 
 void native_register(const char *cls, const char *name, const char *desc, NativeFn fn) {
     if (n_natives == cap_natives) {
@@ -442,7 +442,23 @@ NATIVE(Sys_getProperty) {
     char *k = string_to_utf8(a[0].l);
     const char *v = NULL;
     char buf[64];
-    if (!strcmp(k, "microedition.platform")) v = "Nokia6300/07.21 (J2ME4iOS)";
+    if (vm.sys_props) { /* per-game overrides */
+        char *ov = (char *)malloc(1024);
+        if (manifest_lookup(vm.sys_props, k, ov, 1024) >= 0) {
+            ret->l = new_str(t, ov);
+            free(ov);
+            free(k);
+            return;
+        }
+        free(ov);
+    }
+    if (!strcmp(k, "j4i.font.small") || !strcmp(k, "j4i.font.medium") || !strcmp(k, "j4i.font.large")) {
+        int px = k[9] == 's' ? vm.cfg.font_small : k[9] == 'm' ? vm.cfg.font_medium : vm.cfg.font_large;
+        if (px > 0) {
+            snprintf(buf, sizeof buf, "%d", px);
+            v = buf;
+        }
+    } else if (!strcmp(k, "microedition.platform")) v = "Nokia6300/07.21 (J2ME4iOS)";
     else if (!strcmp(k, "microedition.configuration")) v = "CLDC-1.1";
     else if (!strcmp(k, "microedition.profiles")) v = "MIDP-2.0";
     else if (!strcmp(k, "microedition.locale")) v = "en-US";

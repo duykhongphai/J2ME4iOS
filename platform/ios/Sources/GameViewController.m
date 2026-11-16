@@ -2,62 +2,24 @@
 #import "KeypadView.h"
 #import "IOSHost.h"
 #import "Paths.h"
+#import "Controls.h"
+#import "LogViewController.h"
+#import "GameSession.h"
 #import <QuartzCore/QuartzCore.h>
-#include <os/lock.h>
-#include <stdatomic.h>
+#import <GameController/GameController.h>
+#include <math.h>
 #include "j4i.h"
 
-/* Frame buffer shared between the VM thread (writer) and the main thread (reader). */
-static os_unfair_lock gFbLock = OS_UNFAIR_LOCK_INIT;
-static uint32_t *gFb;
-static int gFbW, gFbH;
-static atomic_int gFramePending;
-static __weak GameViewController *gCurrent;
+#define HW_KEY_MENU 10000
 
 @interface GameViewController ()
-- (void)updateScreen;
-- (void)vmExited;
-- (void)askText:(int)reqId title:(NSString *)title text:(NSString *)text maxLen:(int)maxLen constraints:(int)constraints;
+- (void)showMenu:(UIView *)src;
 @end
-
-/* ---------------- host callbacks (VM thread) ---------------- */
-static void host_log(void *u, const char *msg) { NSLog(@"%s", msg); }
-
-static void host_present(void *u, const uint32_t *argb, int w, int h) {
-    os_unfair_lock_lock(&gFbLock);
-    if (gFbW != w || gFbH != h) {
-        free(gFb);
-        gFb = (uint32_t *)malloc((size_t)w * h * 4);
-        gFbW = w;
-        gFbH = h;
-    }
-    memcpy(gFb, argb, (size_t)w * h * 4);
-    os_unfair_lock_unlock(&gFbLock);
-    if (atomic_exchange(&gFramePending, 1) == 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            atomic_store(&gFramePending, 0);
-            [gCurrent updateScreen];
-        });
-    }
-}
-
-static void host_text_input(void *u, int req_id, const char *title, const char *text, int max_len, int constraints) {
-    NSString *t = [NSString stringWithUTF8String:title] ?: @"";
-    NSString *s = [NSString stringWithUTF8String:text] ?: @"";
-    dispatch_async(dispatch_get_main_queue(), ^{
-        GameViewController *g = gCurrent;
-        if (g) [g askText:req_id title:t text:s maxLen:max_len constraints:constraints];
-        else j4i_text_input_result(req_id, NULL);
-    });
-}
-
-static void host_exited(void *u, int code) {
-    dispatch_async(dispatch_get_main_queue(), ^{ [gCurrent vmExited]; });
-}
 
 /* ---------------- screen view ---------------- */
 @interface J4IScreenView : UIView
 @property (nonatomic) int vmWidth, vmHeight;
+@property (nonatomic, weak) GameSession *session;
 @end
 
 @implementation J4IScreenView {
@@ -85,19 +47,19 @@ static void host_exited(void *u, int code) {
     if (_touch) return;
     _touch = touches.anyObject;
     CGPoint p = [self vmPoint:_touch];
-    j4i_post_event(J4I_EV_POINTER_PRESSED, (int)p.x, (int)p.y);
+    [self.session postEvent:J4I_EV_POINTER_PRESSED a:(int)p.x b:(int)p.y];
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (!_touch || ![touches containsObject:_touch]) return;
     CGPoint p = [self vmPoint:_touch];
-    j4i_post_event(J4I_EV_POINTER_DRAGGED, (int)p.x, (int)p.y);
+    [self.session postEvent:J4I_EV_POINTER_DRAGGED a:(int)p.x b:(int)p.y];
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (!_touch || ![touches containsObject:_touch]) return;
     CGPoint p = [self vmPoint:_touch];
-    j4i_post_event(J4I_EV_POINTER_RELEASED, (int)p.x, (int)p.y);
+    [self.session postEvent:J4I_EV_POINTER_RELEASED a:(int)p.x b:(int)p.y];
     _touch = nil;
 }
 
@@ -109,35 +71,44 @@ static void host_exited(void *u, int code) {
 
 /* ---------------- controller ---------------- */
 @implementation GameViewController {
-    NSString *_jar, *_file;
+    GameSession *_session;
+    NSString *_file;
     int _w, _h;
     J4IScreenView *_screen;
     KeypadView *_keypad;
     UIButton *_menuButton;
-    NSThread *_vm;
-    BOOL _started, _exiting;
+    UILabel *_fpsLabel;
+    NSTimer *_fpsTimer;
+    BOOL _exiting, _switching;
     CGColorSpaceRef _rgb;
-    NSString *_orient, *_scale;
-    BOOL _smooth, _showKeypad;
+    NSString *_orient, *_scale, *_keypadMode;
+    BOOL _smooth, _showFps;
+    NSMutableSet<NSNumber *> *_padHeld;
 }
 
-- (instancetype)initWithJarPath:(NSString *)path width:(int)w height:(int)h {
+- (instancetype)initWithSession:(GameSession *)session {
     if ((self = [super initWithNibName:nil bundle:nil])) {
-        _jar = path;
-        _file = path.lastPathComponent;
-        _w = w;
-        _h = h;
+        _session = session;
+        _file = session.file;
+        _w = session.width;
+        _h = session.height;
         _rgb = CGColorSpaceCreateDeviceRGB();
         _orient = J4IGameSetting(_file, @"orient", @"auto");
         _scale = J4IGameSetting(_file, @"scale", @"fit");
         _smooth = [J4IGameSetting(_file, @"smooth", @"0") isEqualToString:@"1"];
-        _showKeypad = ![J4IGameSetting(_file, @"keypad", @"1") isEqualToString:@"0"];
+        NSString *k = J4IGameSetting(_file, @"keypad", @"show");
+        if ([k isEqualToString:@"1"]) k = @"show";
+        if ([k isEqualToString:@"0"]) k = @"hide";
+        _keypadMode = k;
+        _showFps = [J4IGameSetting(_file, @"fps", @"0") isEqualToString:@"1"];
+        _padHeld = [NSMutableSet set];
     }
     return self;
 }
 
 - (void)dealloc {
     CGColorSpaceRelease(_rgb);
+    [_fpsTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -158,19 +129,31 @@ static void host_exited(void *u, int code) {
     return UIInterfaceOrientationPortrait;
 }
 
+static UIColor *backgroundFor(NSString *name) {
+    if ([name isEqualToString:@"gray"]) return [UIColor colorWithWhite:0.18 alpha:1];
+    if ([name isEqualToString:@"white"]) return [UIColor colorWithWhite:0.92 alpha:1];
+    if ([name isEqualToString:@"lcd"]) return [UIColor colorWithRed:0.55 green:0.62 blue:0.45 alpha:1];
+    if ([name isEqualToString:@"blue"]) return [UIColor colorWithRed:0.08 green:0.12 blue:0.22 alpha:1];
+    return [UIColor blackColor];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor = [UIColor blackColor];
+    self.view.backgroundColor = backgroundFor(J4IGameSetting(_file, @"bg", @"black"));
     _keypad = [[KeypadView alloc] initWithFrame:CGRectZero];
+    _keypad.gamepad = [J4IGameSetting(_file, @"keypadType", @"phone") isEqualToString:@"gamepad"];
+    _keypad.keyAlpha = [J4IGameSetting(_file, @"keyAlpha", @"80") intValue] / 100.0;
+    _keypad.haptics = ![J4IGameSetting(_file, @"haptics", @"1") isEqualToString:@"0"];
     __weak GameViewController *weakSelf = self;
     _keypad.onKey = ^(int code, BOOL down) {
-        j4i_post_event(down ? J4I_EV_KEY_PRESSED : J4I_EV_KEY_RELEASED, code, 0);
+        [weakSelf.session postEvent:(down ? J4I_EV_KEY_PRESSED : J4I_EV_KEY_RELEASED) a:code b:0];
     };
     _keypad.onMenu = ^(UIView *src) { [weakSelf showMenu:src]; };
     [self.view addSubview:_keypad];
     _screen = [[J4IScreenView alloc] initWithFrame:CGRectZero];
     _screen.vmWidth = _w;
     _screen.vmHeight = _h;
+    _screen.session = _session;
     [self.view addSubview:_screen];
     [self applyFilter];
 
@@ -183,9 +166,20 @@ static void host_exited(void *u, int code) {
     [_menuButton addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:_menuButton];
 
+    _fpsLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightSemibold];
+    _fpsLabel.textColor = [UIColor greenColor];
+    _fpsLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.5];
+    _fpsLabel.textAlignment = NSTextAlignmentCenter;
+    _fpsLabel.hidden = !_showFps;
+    [self.view addSubview:_fpsLabel];
+
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-    [nc addObserver:self selector:@selector(appBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
-    [nc addObserver:self selector:@selector(appForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
+    [nc addObserver:self selector:@selector(controllersChanged) name:GCControllerDidConnectNotification object:nil];
+    [nc addObserver:self selector:@selector(controllersChanged) name:GCControllerDidDisconnectNotification object:nil];
+    [nc addObserver:self selector:@selector(controllersChanged) name:GCKeyboardDidConnectNotification object:nil];
+    [nc addObserver:self selector:@selector(controllersChanged) name:GCKeyboardDidDisconnectNotification object:nil];
+    [self controllersChanged];
 }
 
 - (void)menuButtonTapped:(UIButton *)b {
@@ -197,12 +191,19 @@ static void host_exited(void *u, int code) {
     _screen.layer.minificationFilter = _smooth ? kCAFilterLinear : kCAFilterNearest;
 }
 
+- (BOOL)showKeypad {
+    if ([_keypadMode isEqualToString:@"hide"]) return NO;
+    if ([_keypadMode isEqualToString:@"auto"]) return GCController.controllers.count == 0 && GCKeyboard.coalescedKeyboard == nil;
+    return YES;
+}
+
 /* Places a fw x fh frame inside `area` according to the scale mode. */
 - (CGRect)fitWidth:(int)fw height:(int)fh inRect:(CGRect)area topAligned:(BOOL)top {
     if (fw <= 0 || fh <= 0 || area.size.width <= 0 || area.size.height <= 0) return area;
     if ([_scale isEqualToString:@"stretch"]) return area;
     CGFloat s = MIN(area.size.width / fw, area.size.height / fh);
     if ([_scale isEqualToString:@"integer"] && s >= 1) s = floor(s);
+    if ([_scale isEqualToString:@"native"]) s = MIN(1, s);
     CGFloat sw = fw * s, sh = fh * s;
     CGFloat x = area.origin.x + (area.size.width - sw) / 2;
     CGFloat y = top ? area.origin.y : area.origin.y + (area.size.height - sh) / 2;
@@ -215,10 +216,12 @@ static void host_exited(void *u, int code) {
     BOOL landscape = safe.size.width > safe.size.height;
     int fw = _screen.vmWidth > 0 ? _screen.vmWidth : _w;
     int fh = _screen.vmHeight > 0 ? _screen.vmHeight : _h;
-    _keypad.hidden = !_showKeypad;
-    _menuButton.hidden = _showKeypad;
+    BOOL keypad = [self showKeypad];
+    if (!keypad && !_keypad.hidden) [_keypad releaseAll];
+    _keypad.hidden = !keypad;
+    _menuButton.hidden = keypad;
     _keypad.landscape = landscape;
-    if (!_showKeypad) {
+    if (!keypad) {
         _screen.frame = [self fitWidth:fw height:fh inRect:safe topAligned:NO];
         CGFloat bs = 36;
         _menuButton.frame = CGRectMake(CGRectGetMaxX(safe) - bs - 4, safe.origin.y + 4, bs, bs);
@@ -235,109 +238,146 @@ static void host_exited(void *u, int code) {
         _keypad.frame = safe;
         _keypad.screenGap = [self.view convertRect:_screen.frame toView:_keypad];
     }
+    _fpsLabel.frame = CGRectMake(_screen.frame.origin.x + 2, _screen.frame.origin.y + 2, 54, 16);
+    [self.view bringSubviewToFront:_fpsLabel];
     [_keypad setNeedsLayout];
 }
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self becomeFirstResponder];
-    if (_started) return;
-    _started = YES;
-    gCurrent = self;
-    [self startVM];
-}
-
-- (void)startVM {
-    NSString *runtime = [[NSBundle mainBundle] pathForResource:@"j4i-runtime" ofType:@"jar"];
-    NSString *dataDir = J4IDataDirFor(_jar.lastPathComponent);
-    [[NSFileManager defaultManager] createDirectoryAtPath:dataDir withIntermediateDirectories:YES attributes:nil error:nil];
-    char *rt = strdup(runtime.fileSystemRepresentation);
-    char *jar = strdup(_jar.fileSystemRepresentation);
-    char *dd = strdup(dataDir.fileSystemRepresentation);
-    int w = _w, h = _h;
-    _vm = [[NSThread alloc] initWithBlock:^{
-        J4IConfig cfg;
-        memset(&cfg, 0, sizeof cfg);
-        cfg.runtime_jar = rt;
-        cfg.game_jar = jar;
-        cfg.data_dir = dd;
-        cfg.screen_w = w;
-        cfg.screen_h = h;
-        cfg.heap_mb = 64;
-        cfg.host.log = host_log;
-        cfg.host.present = host_present;
-        cfg.host.text_input = host_text_input;
-        cfg.host.exited = host_exited;
-        J4IIOSHostFill(&cfg.host);
-        j4i_run(&cfg);
-        J4IIOSAudioReset();
-        free(rt);
-        free(jar);
-        free(dd);
-    }];
-    _vm.stackSize = 16 * 1024 * 1024;
-    _vm.qualityOfService = NSQualityOfServiceUserInteractive;
-    _vm.name = @"J2ME VM";
-    [_vm start];
-}
-
-- (void)updateScreen {
-    os_unfair_lock_lock(&gFbLock);
-    int w = gFbW, h = gFbH;
-    if (!gFb || w <= 0 || h <= 0) {
-        os_unfair_lock_unlock(&gFbLock);
+    _session.viewController = self;
+    /* the shown game plays sound; others are muted unless the user wants background audio */
+    BOOL bgAudio = [[NSUserDefaults standardUserDefaults] boolForKey:@"bgAudio"];
+    for (GameSession *s in [GameSession all]) s.audioMuted = (s != _session) && !bgAudio;
+    if (!_session.running) {
+        [self sessionExited];
         return;
     }
-    CFDataRef data = CFDataCreate(NULL, (const UInt8 *)gFb, (CFIndex)w * h * 4);
-    os_unfair_lock_unlock(&gFbLock);
+    [self sessionFrameReady];
+    if (_session.pendingTextRequest) {
+        void (^req)(GameViewController *) = _session.pendingTextRequest;
+        _session.pendingTextRequest = nil;
+        req(self);
+    }
+    [_session takeFrameCount];
+    [_fpsTimer invalidate];
+    __weak GameViewController *weakSelf = self;
+    _fpsTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                repeats:YES
+                                                  block:^(NSTimer *timer) {
+                                                      GameViewController *s = weakSelf;
+                                                      if (!s) {
+                                                          [timer invalidate];
+                                                          return;
+                                                      }
+                                                      s->_fpsLabel.text = [NSString stringWithFormat:@"%d fps", [s->_session takeFrameCount]];
+                                                  }];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [_fpsTimer invalidate];
+    _fpsTimer = nil;
+    [_keypad releaseAll];
+    for (NSNumber *c in _padHeld) [_session postEvent:J4I_EV_KEY_RELEASED a:c.intValue b:0];
+    [_padHeld removeAllObjects];
+    if (_session.viewController == self) _session.viewController = nil;
+    if (_session.running && ![[NSUserDefaults standardUserDefaults] boolForKey:@"bgAudio"]) _session.audioMuted = YES;
+}
+
+- (void)sessionFrameReady {
+    __block CGImageRef img = NULL;
+    __block int w = 0, h = 0;
+    CGColorSpaceRef rgb = _rgb;
+    [_session withFrame:^(const uint32_t *argb, int fw, int fh) {
+        CFDataRef data = CFDataCreate(NULL, (const UInt8 *)argb, (CFIndex)fw * fh * 4);
+        CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
+        img = CGImageCreate(fw, fh, 8, 32, (size_t)fw * 4, rgb, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, prov, NULL, false,
+                            kCGRenderingIntentDefault);
+        CGDataProviderRelease(prov);
+        CFRelease(data);
+        w = fw;
+        h = fh;
+    }];
+    if (!img) return;
     if (w != _screen.vmWidth || h != _screen.vmHeight) { /* the game changed its frame size */
         _screen.vmWidth = w;
         _screen.vmHeight = h;
         [self.view setNeedsLayout];
     }
-    CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
-    CGImageRef img = CGImageCreate(w, h, 8, 32, (size_t)w * 4, _rgb, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, prov, NULL,
-                                   false, kCGRenderingIntentDefault);
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     _screen.layer.contents = (__bridge id)img;
     [CATransaction commit];
     CGImageRelease(img);
-    CGDataProviderRelease(prov);
-    CFRelease(data);
 }
 
+/* ---------------- in-game menu ---------------- */
 - (void)showMenu:(UIView *)src {
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:nil message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    if (self.presentedViewController) return;
+    NSString *title = [NSString stringWithFormat:@"%@ · khe lưu %d", _session.title, _session.slot];
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:title message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak GameViewController *weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:_showKeypad ? @"Ẩn bàn phím ảo" : @"Hiện bàn phím ảo"
+    BOOL keypad = [self showKeypad];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Về danh sách (game vẫn chạy)"
                                            style:UIAlertActionStyleDefault
-                                         handler:^(UIAlertAction *a) { [weakSelf toggleKeypad]; }]];
-    NSString *scaleName = [_scale isEqualToString:@"integer"] ? @"Số nguyên" : ([_scale isEqualToString:@"stretch"] ? @"Kéo giãn" : @"Vừa khung");
+                                         handler:^(UIAlertAction *a) { [weakSelf leaveRunning]; }]];
+    if ([GameSession all].count > 1) {
+        [ac addAction:[UIAlertAction actionWithTitle:@"Chuyển sang game khác…"
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(UIAlertAction *a) { [weakSelf chooseSession:src]; }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:keypad ? @"Ẩn bàn phím ảo" : @"Hiện bàn phím ảo"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf setKeypadShown:!keypad]; }]];
+    [ac addAction:[UIAlertAction actionWithTitle:_keypad.gamepad ? @"Bàn phím kiểu điện thoại" : @"Bàn phím kiểu tay cầm"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf toggleKeypadType]; }]];
+    NSString *scaleName = [_scale isEqualToString:@"integer"] ? @"Số nguyên"
+                        : [_scale isEqualToString:@"stretch"] ? @"Kéo giãn"
+                        : [_scale isEqualToString:@"native"] ? @"Gốc 1×"
+                                                              : @"Vừa khung";
     [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Kiểu phóng to: %@", scaleName]
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *a) { [weakSelf cycleScale]; }]];
     [ac addAction:[UIAlertAction actionWithTitle:_smooth ? @"Tắt làm mịn ảnh" : @"Bật làm mịn ảnh"
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *a) { [weakSelf toggleSmooth]; }]];
+    [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Âm lượng: %d%%", (int)lroundf(J4IIOSMasterVolume() * 100)]
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf chooseVolume:src]; }]];
+    [ac addAction:[UIAlertAction actionWithTitle:_showFps ? @"Ẩn FPS" : @"Hiện FPS"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf toggleFps]; }]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"Xem log"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf showLog]; }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Thoát game"
                                            style:UIAlertActionStyleDestructive
                                          handler:^(UIAlertAction *a) { [weakSelf requestExit]; }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
-    ac.popoverPresentationController.sourceView = src;
-    ac.popoverPresentationController.sourceRect = src.bounds;
+    ac.popoverPresentationController.sourceView = src ?: self.view;
+    ac.popoverPresentationController.sourceRect = src ? src.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), 40, 1, 1);
     [self presentViewController:ac animated:YES completion:nil];
 }
 
-- (void)toggleKeypad {
-    _showKeypad = !_showKeypad;
-    J4ISetGameSetting(_file, @"keypad", _showKeypad ? @"1" : @"0");
+- (void)setKeypadShown:(BOOL)shown {
+    _keypadMode = shown ? @"show" : @"hide";
+    J4ISetGameSetting(_file, @"keypad", _keypadMode);
+    [self.view setNeedsLayout];
+}
+
+- (void)toggleKeypadType {
+    _keypad.gamepad = !_keypad.gamepad;
+    J4ISetGameSetting(_file, @"keypadType", _keypad.gamepad ? @"gamepad" : @"phone");
     [self.view setNeedsLayout];
 }
 
 - (void)cycleScale {
     if ([_scale isEqualToString:@"fit"]) _scale = @"integer";
     else if ([_scale isEqualToString:@"integer"]) _scale = @"stretch";
+    else if ([_scale isEqualToString:@"stretch"]) _scale = @"native";
     else _scale = @"fit";
     J4ISetGameSetting(_file, @"scale", _scale);
     [self.view setNeedsLayout];
@@ -349,24 +389,83 @@ static void host_exited(void *u, int code) {
     [self applyFilter];
 }
 
+- (void)toggleFps {
+    _showFps = !_showFps;
+    _fpsLabel.hidden = !_showFps;
+    J4ISetGameSetting(_file, @"fps", _showFps ? @"1" : @"0");
+}
+
+- (void)chooseVolume:(UIView *)src {
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Âm lượng" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    int cur = (int)lroundf(J4IIOSMasterVolume() * 100);
+    for (NSNumber *v in @[@0, @25, @50, @75, @100]) {
+        NSString *t = v.intValue == 0 ? @"Tắt tiếng" : [NSString stringWithFormat:@"%d%%", v.intValue];
+        if (v.intValue == cur) t = [t stringByAppendingString:@" ✓"];
+        [ac addAction:[UIAlertAction actionWithTitle:t
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(UIAlertAction *a) { J4IIOSSetMasterVolume(v.intValue / 100.0f); }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    ac.popoverPresentationController.sourceView = src ?: self.view;
+    ac.popoverPresentationController.sourceRect = src ? src.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), 40, 1, 1);
+    [self presentViewController:ac animated:YES completion:nil];
+}
+
+- (void)showLog {
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[[LogViewController alloc] init]];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
 - (void)requestExit {
     if (_exiting) return;
     _exiting = YES;
-    j4i_request_exit();
+    [_session requestExit];
 }
 
-- (void)vmExited {
-    gCurrent = nil;
-    os_unfair_lock_lock(&gFbLock);
-    free(gFb);
-    gFb = NULL;
-    gFbW = gFbH = 0;
-    os_unfair_lock_unlock(&gFbLock);
+- (void)sessionExited {
+    [_fpsTimer invalidate];
+    _fpsTimer = nil;
     if (self.presentedViewController) [self.presentedViewController dismissViewControllerAnimated:NO completion:nil];
+    if (self.presentingViewController && !_switching) [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+/** Back to the game list; the game keeps running. */
+- (void)leaveRunning {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
+/** Shows another running session in place of this one. */
+- (void)switchTo:(GameSession *)other {
+    UIViewController *presenter = self.presentingViewController;
+    if (!presenter || !other.running) return;
+    _switching = YES;
+    [self dismissViewControllerAnimated:NO
+                             completion:^{
+                                 GameViewController *g = [[GameViewController alloc] initWithSession:other];
+                                 g.modalPresentationStyle = UIModalPresentationFullScreen;
+                                 [presenter presentViewController:g animated:NO completion:nil];
+                             }];
+}
+
+- (void)chooseSession:(UIView *)src {
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Chuyển sang game đang chạy"
+                                                                message:nil
+                                                         preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak GameViewController *weakSelf = self;
+    for (GameSession *s in [GameSession all]) {
+        if (s == _session) continue;
+        [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"%@ (khe %d)", s.title, s.slot]
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(UIAlertAction *a) { [weakSelf switchTo:s]; }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    ac.popoverPresentationController.sourceView = src ?: self.view;
+    ac.popoverPresentationController.sourceRect = src ? src.bounds : CGRectMake(CGRectGetMidX(self.view.bounds), 40, 1, 1);
+    [self presentViewController:ac animated:YES completion:nil];
+}
+
 - (void)askText:(int)reqId title:(NSString *)title text:(NSString *)text maxLen:(int)maxLen constraints:(int)constraints {
+    GameSession *sess = _session;
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:title.length ? title : @"Nhập chữ"
                                                                 message:nil
                                                          preferredStyle:UIAlertControllerStyleAlert];
@@ -384,23 +483,68 @@ static void host_exited(void *u, int code) {
     __weak UIAlertController *weakAc = ac;
     [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ"
                                            style:UIAlertActionStyleCancel
-                                         handler:^(UIAlertAction *a) { j4i_text_input_result(reqId, NULL); }]];
+                                         handler:^(UIAlertAction *a) { [sess textResult:reqId text:nil]; }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"OK"
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *a) {
                                              NSString *s = weakAc.textFields.firstObject.text ?: @"";
                                              if (maxLen > 0 && (int)s.length > maxLen) s = [s substringToIndex:maxLen];
-                                             j4i_text_input_result(reqId, s.UTF8String);
+                                             [sess textResult:reqId text:s];
                                          }]];
+    if (self.presentedViewController) [self.presentedViewController dismissViewControllerAnimated:NO completion:nil];
     [self presentViewController:ac animated:YES completion:nil];
 }
 
-- (void)appBackground {
-    j4i_post_event(J4I_EV_PAUSE, 0, 0);
+
+/* ---------------- game controllers ---------------- */
+- (void)controllersChanged {
+    for (GCController *c in GCController.controllers) {
+        GCExtendedGamepad *pad = c.extendedGamepad;
+        if (!pad) continue;
+        __weak GameViewController *weakSelf = self;
+        pad.valueChangedHandler = ^(GCExtendedGamepad *gamepad, GCControllerElement *element) {
+            [weakSelf gamepadChanged:gamepad element:element];
+        };
+    }
+    [self.view setNeedsLayout];
 }
 
-- (void)appForeground {
-    j4i_post_event(J4I_EV_RESUME, 0, 0);
+- (void)gamepadChanged:(GCExtendedGamepad *)g element:(GCControllerElement *)element {
+    if (element == g.buttonHome && g.buttonHome.pressed) {
+        [self showMenu:nil];
+        return;
+    }
+    NSMutableSet<NSNumber *> *now = [NSMutableSet set];
+    NSDictionary<NSString *, GCControllerButtonInput *> *buttons = @{
+        @"A": g.buttonA, @"B": g.buttonB, @"X": g.buttonX, @"Y": g.buttonY,
+        @"LB": g.leftShoulder, @"RB": g.rightShoulder, @"LT": g.leftTrigger, @"RT": g.rightTrigger, @"Menu": g.buttonMenu,
+    };
+    for (NSString *bid in buttons) {
+        GCControllerButtonInput *b = buttons[bid];
+        int code = J4IPadMapping(bid);
+        if (b.pressed && code) [now addObject:@(code)];
+    }
+    if (g.buttonOptions.pressed && J4IPadMapping(@"Options")) [now addObject:@(J4IPadMapping(@"Options"))];
+    float lx = g.leftThumbstick.xAxis.value, ly = g.leftThumbstick.yAxis.value;
+    if (g.dpad.up.pressed || ly > 0.5f) [now addObject:@(J4I_KEY_UP)];
+    if (g.dpad.down.pressed || ly < -0.5f) [now addObject:@(J4I_KEY_DOWN)];
+    if (g.dpad.left.pressed || lx < -0.5f) [now addObject:@(J4I_KEY_LEFT)];
+    if (g.dpad.right.pressed || lx > 0.5f) [now addObject:@(J4I_KEY_RIGHT)];
+    float rx = g.rightThumbstick.xAxis.value, ry = g.rightThumbstick.yAxis.value;
+    if (ry > 0.5f) [now addObject:@('2')];
+    if (ry < -0.5f) [now addObject:@('8')];
+    if (rx < -0.5f) [now addObject:@('4')];
+    if (rx > 0.5f) [now addObject:@('6')];
+    for (NSNumber *c in [_padHeld copy])
+        if (![now containsObject:c]) {
+            [_session postEvent:J4I_EV_KEY_RELEASED a:c.intValue b:0];
+            [_padHeld removeObject:c];
+        }
+    for (NSNumber *c in now)
+        if (![_padHeld containsObject:c]) {
+            [_session postEvent:J4I_EV_KEY_PRESSED a:c.intValue b:0];
+            [_padHeld addObject:c];
+        }
 }
 
 /* ---------------- hardware keyboard (iPad / Bluetooth) ---------------- */
@@ -414,6 +558,9 @@ static int mapKey(UIKey *k) {
     case UIKeyboardHIDUsageKeyboardF1: case UIKeyboardHIDUsageKeyboardQ: return J4I_KEY_SOFT_LEFT;
     case UIKeyboardHIDUsageKeyboardF2: case UIKeyboardHIDUsageKeyboardW: return J4I_KEY_SOFT_RIGHT;
     case UIKeyboardHIDUsageKeyboardDeleteOrBackspace: return J4I_KEY_CLEAR;
+    case UIKeyboardHIDUsageKeyboardE: return '*';
+    case UIKeyboardHIDUsageKeyboardR: return '#';
+    case UIKeyboardHIDUsageKeyboardEscape: case UIKeyboardHIDUsageKeyboardM: return HW_KEY_MENU;
     default: break;
     }
     NSString *c = k.charactersIgnoringModifiers;
@@ -426,13 +573,14 @@ static int mapKey(UIKey *k) {
 
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
-    if (@available(iOS 13.4, *)) {
-        for (UIPress *p in presses) {
-            int code = p.key ? mapKey(p.key) : 0;
-            if (code) {
-                j4i_post_event(J4I_EV_KEY_PRESSED, code, 0);
-                handled = YES;
-            }
+    for (UIPress *p in presses) {
+        int code = p.key ? mapKey(p.key) : 0;
+        if (code == HW_KEY_MENU) {
+            [self showMenu:nil];
+            handled = YES;
+        } else if (code) {
+            [_session postEvent:J4I_EV_KEY_PRESSED a:code b:0];
+            handled = YES;
         }
     }
     if (!handled) [super pressesBegan:presses withEvent:event];
@@ -440,13 +588,13 @@ static int mapKey(UIKey *k) {
 
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
     BOOL handled = NO;
-    if (@available(iOS 13.4, *)) {
-        for (UIPress *p in presses) {
-            int code = p.key ? mapKey(p.key) : 0;
-            if (code) {
-                j4i_post_event(J4I_EV_KEY_RELEASED, code, 0);
-                handled = YES;
-            }
+    for (UIPress *p in presses) {
+        int code = p.key ? mapKey(p.key) : 0;
+        if (code == HW_KEY_MENU) {
+            handled = YES;
+        } else if (code) {
+            [_session postEvent:J4I_EV_KEY_RELEASED a:code b:0];
+            handled = YES;
         }
     }
     if (!handled) [super pressesEnded:presses withEvent:event];

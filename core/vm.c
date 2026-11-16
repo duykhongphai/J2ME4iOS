@@ -2,7 +2,7 @@
 #include "vm.h"
 #include <ctype.h>
 
-VM vm;
+J4I_TLS VM *vm_ptr;
 
 /* ---------------- manifest / JAD parsing ---------------- */
 int manifest_lookup(const char *text, const char *key, char *out, int outlen) {
@@ -132,10 +132,15 @@ static void shutdown_vm(void) {
     vm.game = NULL;
     free(vm.manifest);
     vm.manifest = NULL;
+    free(vm.jad_props);
+    vm.jad_props = NULL;
+    free(vm.sys_props);
+    vm.sys_props = NULL;
+    midi_cache_free();
     os_destroy();
 }
 
-int j4i_run(const J4IConfig *cfg) {
+static int run_vm(const J4IConfig *cfg) {
     volatile int base_marker = 0;
     memset(&vm, 0, sizeof vm);
     vm.cfg = *cfg;
@@ -175,6 +180,37 @@ int j4i_run(const J4IConfig *cfg) {
         vm.game = g;
         int len;
         vm.manifest = (char *)zip_read(g, "META-INF/MANIFEST.MF", &len);
+    }
+    if (cfg->jad_path) {
+        size_t jl;
+        vm.jad_props = (char *)os_read_file(cfg->jad_path, &jl);
+        if (!vm.jad_props) vm_log("cannot read JAD %s", cfg->jad_path);
+    }
+    if (cfg->sys_props) {
+        /* accept "key=value" or "key: value" lines; store as "key: value" for manifest_lookup */
+        size_t n = strlen(cfg->sys_props);
+        vm.sys_props = (char *)malloc(n * 2 + 2);
+        char *o = vm.sys_props;
+        const char *s = cfg->sys_props;
+        while (*s) {
+            const char *e = s;
+            while (*e && *e != '\n') e++;
+            const char *eq = s;
+            while (eq < e && *eq != '=' && *eq != ':') eq++;
+            if (eq < e && eq > s) {
+                memcpy(o, s, (size_t)(eq - s));
+                o += eq - s;
+                *o++ = ':';
+                *o++ = ' ';
+                const char *v = eq + 1;
+                while (v < e && *v == ' ') v++;
+                memcpy(o, v, (size_t)(e - v));
+                o += e - v;
+                *o++ = '\n';
+            }
+            s = *e ? e + 1 : e;
+        }
+        *o = 0;
     }
 
     natives_init();
@@ -263,4 +299,42 @@ int j4i_run(const J4IConfig *cfg) {
     if (host.exited) host.exited(host.user, code);
     (void)base_marker;
     return code;
+}
+
+/* ---------------- instances ---------------- */
+static J4IInstance g_legacy; /* used by j4i_run / j4i_post_event (single VM hosts) */
+
+J4IInstance *vm_default_instance(void) { return &g_legacy; }
+
+J4IInstance *j4i_instance_new(void) { return (J4IInstance *)calloc(1, sizeof(J4IInstance)); }
+
+void j4i_instance_free(J4IInstance *in) {
+    if (!in || in == &g_legacy) return;
+    os_lock();
+    while (in->text_results) {
+        TextResult *r = in->text_results;
+        in->text_results = r->next;
+        free(r->text);
+        free(r);
+    }
+    os_unlock();
+    free(in);
+}
+
+int j4i_instance_run(J4IInstance *in, const J4IConfig *cfg) {
+    if (!in || !cfg) return -1;
+    vm_ptr = &in->vm_state;
+    in->running = 1;
+    int r = run_vm(cfg);
+    in->running = 0;
+    vm_ptr = NULL;
+    return r;
+}
+
+int j4i_run(const J4IConfig *cfg) {
+    os_lock();
+    g_legacy.ev_head = g_legacy.ev_tail = 0;
+    g_legacy.force_exit_at = 0;
+    os_unlock();
+    return j4i_instance_run(&g_legacy, cfg);
 }

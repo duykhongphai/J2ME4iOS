@@ -6,14 +6,25 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 
-/* ---------------- fonts (VM thread only) ---------------- */
+/* ---------------- fonts (VM threads) ---------------- */
 static NSMutableDictionary<NSNumber *, id> *gFonts;
 
+static CTFontRef makeFont(int size, int style);
+
+/* several VM threads share the cache */
 static CTFontRef fontFor(int size, int style) {
-    if (!gFonts) gFonts = [NSMutableDictionary dictionary];
-    NSNumber *key = @(size * 8 + (style & 3));
-    id cached = gFonts[key];
-    if (cached) return (__bridge CTFontRef)cached;
+    @synchronized([UIFont class]) {
+        if (!gFonts) gFonts = [NSMutableDictionary dictionary];
+        NSNumber *key = @(size * 8 + (style & 3));
+        id cached = gFonts[key];
+        if (cached) return (__bridge CTFontRef)cached;
+        CTFontRef f = makeFont(size, style);
+        gFonts[key] = (__bridge_transfer id)f;
+        return f;
+    }
+}
+
+static CTFontRef makeFont(int size, int style) {
     CTFontRef f = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, size, NULL);
     CTFontSymbolicTraits tr = 0;
     if (style & J4I_FONT_BOLD) tr |= kCTFontBoldTrait;
@@ -25,7 +36,6 @@ static CTFontRef fontFor(int size, int style) {
             f = f2;
         }
     }
-    gFonts[key] = (__bridge_transfer id)f;
     return f;
 }
 
@@ -109,10 +119,87 @@ static int ios_decode(void *u, const uint8_t *data, int len, uint32_t **out, int
     return 1;
 }
 
+/* ---------------- log buffer ---------------- */
+static NSMutableArray<NSString *> *gLog;
+static const NSUInteger kLogMax = 600;
+
+void J4IIOSLogAppend(const char *line) {
+    NSString *s = [NSString stringWithUTF8String:line ? line : ""] ?: @"?";
+    @synchronized([NSProcessInfo class]) {
+        if (!gLog) gLog = [NSMutableArray array];
+        [gLog addObject:s];
+        if (gLog.count > kLogMax) [gLog removeObjectsInRange:NSMakeRange(0, gLog.count - kLogMax)];
+    }
+}
+
+NSString *J4IIOSLogText(void) {
+    @synchronized([NSProcessInfo class]) {
+        return gLog.count ? [gLog componentsJoinedByString:@"\n"] : @"";
+    }
+}
+
+void J4IIOSLogClear(void) {
+    @synchronized([NSProcessInfo class]) {
+        [gLog removeAllObjects];
+    }
+}
+
 /* ---------------- audio ---------------- */
 static NSMutableDictionary<NSNumber *, id> *gPlayers;
 static NSMutableDictionary<NSNumber *, NSNumber *> *gLoops;
+static NSMutableDictionary<NSNumber *, NSNumber *> *gLevels;
+static NSMutableDictionary<NSNumber *, NSValue *> *gOwners; /* handle -> session pointer */
+static NSMutableSet<NSValue *> *gMutedOwners;
 static int gNextHandle;
+
+static void audioInit(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        gPlayers = [NSMutableDictionary dictionary];
+        gLoops = [NSMutableDictionary dictionary];
+        gLevels = [NSMutableDictionary dictionary];
+        gOwners = [NSMutableDictionary dictionary];
+        gMutedOwners = [NSMutableSet set];
+    });
+}
+static float gMaster = -1;
+
+float J4IIOSMasterVolume(void) {
+    if (gMaster < 0) {
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+        gMaster = [d objectForKey:@"masterVolume"] ? [d floatForKey:@"masterVolume"] : 1.0f;
+    }
+    return gMaster;
+}
+
+static float levelFor(int h) {
+    audioInit();
+    NSNumber *n;
+    @synchronized(gPlayers) {
+        n = gLevels[@(h)];
+        NSValue *o = gOwners[@(h)];
+        if (o && [gMutedOwners containsObject:o]) return 0;
+    }
+    return (n ? n.floatValue : 100.0f) / 100.0f * J4IIOSMasterVolume();
+}
+
+void J4IIOSSetMasterVolume(float v) {
+    audioInit();
+    gMaster = MAX(0.0f, MIN(1.0f, v));
+    [[NSUserDefaults standardUserDefaults] setFloat:gMaster forKey:@"masterVolume"];
+    NSDictionary *all;
+    @synchronized(gPlayers) {
+        all = [gPlayers copy];
+    }
+    for (NSNumber *k in all) {
+        id p = all[k];
+        if ([p isKindOfClass:[AVAudioPlayer class]]) ((AVAudioPlayer *)p).volume = levelFor(k.intValue);
+    }
+}
+
+static NSURL *soundBank(void);
+
+BOOL J4IIOSHasSoundBank(void) { return soundBank() != nil; }
 
 static NSURL *soundBank(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -136,10 +223,7 @@ static id playerFor(int h) {
 
 static int ios_audio_create(void *u, const uint8_t *data, int len, const char *mime) {
     @autoreleasepool {
-        if (!gPlayers) {
-            gPlayers = [NSMutableDictionary dictionary];
-            gLoops = [NSMutableDictionary dictionary];
-        }
+        audioInit();
         NSData *d = [NSData dataWithBytes:data length:len];
         BOOL midi = (len >= 4 && memcmp(data, "MThd", 4) == 0) || (mime && strstr(mime, "mid"));
         id player = nil;
@@ -150,6 +234,7 @@ static int ios_audio_create(void *u, const uint8_t *data, int len, const char *m
             player = p;
         } else {
             AVAudioPlayer *p = [[AVAudioPlayer alloc] initWithData:d error:&err];
+            p.volume = [gMutedOwners containsObject:[NSValue valueWithPointer:u]] ? 0 : J4IIOSMasterVolume();
             [p prepareToPlay];
             player = p;
         }
@@ -160,6 +245,7 @@ static int ios_audio_create(void *u, const uint8_t *data, int len, const char *m
         @synchronized(gPlayers) {
             int h = ++gNextHandle;
             gPlayers[@(h)] = player;
+            gOwners[@(h)] = [NSValue valueWithPointer:u];
             return h;
         }
     }
@@ -213,12 +299,17 @@ static void ios_audio_close(void *u, int h) {
     @synchronized(gPlayers) {
         [gPlayers removeObjectForKey:@(h)];
         [gLoops removeObjectForKey:@(h)];
+        [gLevels removeObjectForKey:@(h)];
+        [gOwners removeObjectForKey:@(h)];
     }
 }
 
 static void ios_audio_volume(void *u, int h, int level) {
+    @synchronized(gPlayers) {
+        gLevels[@(h)] = @(level);
+    }
     id p = playerFor(h);
-    if ([p isKindOfClass:[AVAudioPlayer class]]) ((AVAudioPlayer *)p).volume = level / 100.0f;
+    if ([p isKindOfClass:[AVAudioPlayer class]]) ((AVAudioPlayer *)p).volume = levelFor(h);
 }
 
 static int ios_audio_is_playing(void *u, int h) {
@@ -235,13 +326,52 @@ static int ios_audio_is_playing(void *u, int h) {
 }
 
 void J4IIOSAudioReset(void) {
+    audioInit();
     NSArray *all;
     @synchronized(gPlayers) {
         all = gPlayers.allValues;
         [gPlayers removeAllObjects];
         [gLoops removeAllObjects];
+        [gLevels removeAllObjects];
+        [gOwners removeAllObjects];
     }
     for (id p in all) [p stop];
+}
+
+void J4IIOSAudioResetOwner(void *owner) {
+    audioInit();
+    NSValue *o = [NSValue valueWithPointer:owner];
+    NSMutableArray *stop = [NSMutableArray array];
+    @synchronized(gPlayers) {
+        for (NSNumber *h in gOwners.allKeys) {
+            if (![gOwners[h] isEqual:o]) continue;
+            id p = gPlayers[h];
+            if (p) [stop addObject:p];
+            [gPlayers removeObjectForKey:h];
+            [gLoops removeObjectForKey:h];
+            [gLevels removeObjectForKey:h];
+            [gOwners removeObjectForKey:h];
+        }
+        [gMutedOwners removeObject:o];
+    }
+    for (id p in stop) [p stop];
+}
+
+void J4IIOSSetOwnerMuted(void *owner, BOOL muted) {
+    audioInit();
+    NSValue *o = [NSValue valueWithPointer:owner];
+    NSMutableDictionary *mine = [NSMutableDictionary dictionary];
+    @synchronized(gPlayers) {
+        if (muted) [gMutedOwners addObject:o];
+        else [gMutedOwners removeObject:o];
+        for (NSNumber *h in gOwners)
+            if ([gOwners[h] isEqual:o] && gPlayers[h]) mine[h] = gPlayers[h];
+    }
+    for (NSNumber *h in mine) {
+        id p = mine[h];
+        if ([p isKindOfClass:[AVAudioPlayer class]]) ((AVAudioPlayer *)p).volume = levelFor(h.intValue);
+        else if (muted && [p isKindOfClass:[AVMIDIPlayer class]]) [p stop];
+    }
 }
 
 /* ---------------- misc ---------------- */

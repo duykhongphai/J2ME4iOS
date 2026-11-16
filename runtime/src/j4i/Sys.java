@@ -107,6 +107,9 @@ public final class Sys {
 
     public static native String netAddress(int h, boolean local); /* "host:port" */
 
+    /** Renders a Standard MIDI File with the built-in synthesizer; null if it cannot be parsed. */
+    public static native byte[] renderMidi(byte[] smf);
+
     /** zlib (RFC1950) or raw deflate decompression; returns null on error. */
     public static native byte[] inflate(byte[] data, int off, int len, int expectedLen);
 }

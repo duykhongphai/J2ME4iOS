@@ -122,6 +122,37 @@ public class IoTest {
         check("inflate", plain != null && new String(plain).equals("hello hello hello"));
 
         // ---- http (only when asked: needs network)
+        // ---- built-in MIDI synth: 120 bpm (default tempo), 480 ticks/quarter, piano C-E-G quarters + a kick drum
+        java.io.ByteArrayOutputStream trk = new java.io.ByteArrayOutputStream();
+        int[] melody = {60, 64, 67};
+        trk.write(0); trk.write(0xC0); trk.write(0); // program 0
+        trk.write(0); trk.write(0x99); trk.write(36); trk.write(110); // kick on channel 10
+        for (int i = 0; i < 3; i++) {
+            trk.write(0);
+            trk.write(0x90); trk.write(melody[i]); trk.write(100);
+            trk.write(0x83); trk.write(0x60); // delta 480
+            trk.write(0x80); trk.write(melody[i]); trk.write(0);
+        }
+        trk.write(0); trk.write(0xFF); trk.write(0x2F); trk.write(0);
+        byte[] tb = trk.toByteArray();
+        java.io.ByteArrayOutputStream mid = new java.io.ByteArrayOutputStream();
+        mid.write(new byte[] {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0x01, (byte) 0xE0, 'M', 'T', 'r', 'k', 0, 0, 0, (byte) tb.length}, 0, 22);
+        mid.write(tb, 0, tb.length);
+        byte[] midWav = j4i.Sys.renderMidi(mid.toByteArray());
+        int midSamples = midWav == null ? 0 : (midWav.length - 44) / 2;
+        int peak = 0;
+        for (int i = 44; midWav != null && i + 1 < midWav.length; i += 2) {
+            int smp = (short) ((midWav[i] & 255) | (midWav[i + 1] << 8));
+            if (Math.abs(smp) > peak) peak = Math.abs(smp);
+        }
+        // 3 quarter notes at 120 bpm = 1.5 s
+        check("midi render " + midSamples + " samples, peak " + peak, Math.abs(midSamples - 22050 * 155 / 100) < 2000 && peak > 3000);
+        check("midi garbage rejected", j4i.Sys.renderMidi(new byte[] {1, 2, 3}) == null);
+        javax.microedition.media.Player mp = Manager.createPlayer(new java.io.ByteArrayInputStream(mid.toByteArray()), "audio/midi");
+        mp.start();
+        check("midi player started", mp.getState() == Player.STARTED);
+        mp.close();
+
         if (args.length > 0 && args[0].equals("net")) {
             HttpConnection hc = (HttpConnection) Connector.open("http://example.com/");
             int code = hc.getResponseCode();

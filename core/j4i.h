@@ -72,6 +72,14 @@ typedef struct J4IConfig {
     int screen_w, screen_h;   /* virtual screen, e.g. 240x320 */
     int heap_mb;              /* Java heap size, 0 = default (64) */
     int trace;                /* debug tracing level */
+    const char *jad_path;     /* optional .jad: its attributes override the manifest */
+    const char *sys_props;    /* optional "key=value" lines overriding System.getProperty */
+    int font_small, font_medium, font_large; /* font pixel sizes, 0 = automatic */
+    int font_no_aa;           /* 1 = draw text without anti-aliasing */
+    int midi_synth;           /* 1 = render MIDI with the built-in synth (host gets WAV) */
+    const char *proxy;        /* optional upstream proxy for all TCP (sockets and HTTP):
+                                 socks5://[user:pass@]host:port, socks5h://... (proxy resolves
+                                 names) or http://[user:pass@]host:port (HTTP CONNECT) */
     J4IHost host;
 } J4IConfig;
 
@@ -95,6 +103,19 @@ enum {
     J4I_KEY_FIRE = -5, J4I_KEY_SOFT_LEFT = -6, J4I_KEY_SOFT_RIGHT = -7, J4I_KEY_CLEAR = -8
 };
 
+/* ---- several VMs at once ----
+ * Each instance runs on its own thread (the one that calls j4i_instance_run).
+ * Create, run (blocks until the MIDlet exits), then free once no other thread
+ * still posts to it. Post/exit/text functions are thread safe. */
+typedef struct J4IInstance J4IInstance;
+J4IInstance *j4i_instance_new(void);
+int  j4i_instance_run(J4IInstance *inst, const J4IConfig *cfg);
+void j4i_instance_free(J4IInstance *inst);
+void j4i_instance_post_event(J4IInstance *inst, int type, int a, int b);
+void j4i_instance_text_input_result(J4IInstance *inst, int req_id, const char *utf8_or_null);
+void j4i_instance_request_exit(J4IInstance *inst);
+
+/* ---- single VM convenience API (the most recently started instance) ---- */
 /* Run the VM until the application exits. Returns an exit code. */
 int  j4i_run(const J4IConfig *cfg);
 

@@ -33,6 +33,14 @@ public final class Font {
     }
 
     static int pixelSize(int size) {
+        String custom = j4i.Sys.getProperty(size == SIZE_SMALL ? "j4i.font.small" : size == SIZE_LARGE ? "j4i.font.large" : "j4i.font.medium");
+        if (custom != null) {
+            try {
+                int v = Integer.parseInt(custom.trim());
+                if (v >= 6 && v <= 64) return v;
+            } catch (NumberFormatException e) {
+            }
+        }
         int base = size == SIZE_SMALL ? 12 : size == SIZE_LARGE ? 16 : 14;
         int sw = Math.min(j4i.Sys.screenWidth(), j4i.Sys.screenHeight());
         int px = base * sw / 240;

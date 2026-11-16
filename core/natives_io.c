@@ -118,14 +118,13 @@ static bool fs_map(Object *jpath, char *out, size_t n) {
 }
 
 static void fs_ensure_root(void) {
-    static bool done;
-    if (done) return;
+    if (vm.fs_ready) return;
     char root[1000];
     fs_root(root, sizeof root);
     char r1[1100];
     snprintf(r1, sizeof r1, "%s/root1", root);
     os_mkdirs(r1);
-    done = true;
+    vm.fs_ready = true;
 }
 
 NATIVE(Sys_fsType) {
@@ -331,4 +330,21 @@ void natives_io_register(void) {
     R("netAddress", "(IZ)Ljava/lang/String;", Sys_netAddress);
     R("inflate", "([BIII)[B", Sys_inflate);
 #undef R
+    void natives_io_register2(void);
+    natives_io_register2();
 }
+
+/* renderMidi(byte[] smf) -> WAV bytes or null (built-in synth, used by tests and tools) */
+static void Sys_renderMidi(Thread *t, Value *a, Value *ret) {
+    Array *b = (Array *)a[0].l;
+    if (!b) { throw_new(t, "java/lang/NullPointerException", NULL); return; }
+    int wl;
+    uint8_t *w = midi_render_wav((const uint8_t *)ARR_B(b), b->length, &wl);
+    if (!w) return;
+    Array *r = alloc_prim_array(t, 'B', wl);
+    if (r) memcpy(ARR_B(r), w, wl);
+    free(w);
+    ret->l = (Object *)r;
+}
+
+void natives_io_register2(void) { native_register("j4i/Sys", "renderMidi", "([B)[B", Sys_renderMidi); }

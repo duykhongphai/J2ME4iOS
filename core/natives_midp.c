@@ -148,33 +148,29 @@ NATIVE(Sys_platformRequest) {
     free(u);
 }
 
-/* text input results arrive from the host thread */
-typedef struct TextResult {
-    int id;
-    char *text;
-    bool cancelled;
-    struct TextResult *next;
-} TextResult;
-static TextResult *text_results;
-static int text_req_counter;
+/* text input results arrive from the host thread (stored on the instance) */
+static J4I_TLS int text_req_counter;
 
-void j4i_text_input_result(int req_id, const char *utf8) {
+void j4i_text_input_result(int req_id, const char *utf8) { j4i_instance_text_input_result(vm_default_instance(), req_id, utf8); }
+
+void j4i_instance_text_input_result(J4IInstance *in, int req_id, const char *utf8) {
+    if (!in) return;
     TextResult *r = (TextResult *)calloc(1, sizeof(TextResult));
     r->id = req_id;
     r->text = utf8 ? strdup(utf8) : NULL;
     r->cancelled = utf8 == NULL;
     os_lock();
-    r->next = text_results;
-    text_results = r;
+    r->next = in->text_results;
+    in->text_results = r;
     os_unlock();
-    j4i_post_event(J4I_EV_TEXT_INPUT, req_id, utf8 ? 1 : 0);
+    j4i_instance_post_event(in, J4I_EV_TEXT_INPUT, req_id, utf8 ? 1 : 0);
 }
 
 char *text_input_take(int id, bool *found) {
     char *res = NULL;
     *found = false;
     os_lock();
-    for (TextResult **pp = &text_results; *pp; pp = &(*pp)->next) {
+    for (TextResult **pp = &INST->text_results; *pp; pp = &(*pp)->next) {
         if ((*pp)->id == id) {
             TextResult *r = *pp;
             *pp = r->next;
@@ -194,7 +190,7 @@ NATIVE(Sys_requestTextInput) {
     char *title = a[0].l ? string_to_utf8(a[0].l) : strdup("");
     char *text = a[1].l ? string_to_utf8(a[1].l) : strdup("");
     if (vm.cfg.host.text_input) vm.cfg.host.text_input(vm.cfg.host.user, id, title, text, a[2].i, a[3].i);
-    else j4i_text_input_result(id, text);
+    else j4i_instance_text_input_result(INST, id, text);
     free(title);
     free(text);
     ret->i = id;
@@ -214,7 +210,19 @@ NATIVE(Sys_audioCreate) {
     (void)t;
     Array *b = (Array *)a[0].l;
     char *mime = a[1].l ? string_to_utf8(a[1].l) : strdup("");
-    ret->i = (b && vm.cfg.host.audio_create) ? vm.cfg.host.audio_create(vm.cfg.host.user, (const uint8_t *)ARR_B(b), b->length, mime) : 0;
+    const uint8_t *data = b ? (const uint8_t *)ARR_B(b) : NULL;
+    int len = b ? b->length : 0;
+    const char *type = mime;
+    if (vm.cfg.midi_synth && data && len >= 14 && !memcmp(data, "MThd", 4)) {
+        int wl;
+        const uint8_t *w = midi_cached_wav(data, len, &wl);
+        if (w) {
+            data = w;
+            len = wl;
+            type = "audio/x-wav";
+        } else TRACE(1, "MIDI render failed");
+    }
+    ret->i = (data && vm.cfg.host.audio_create) ? vm.cfg.host.audio_create(vm.cfg.host.user, data, len, type) : 0;
     free(mime);
 }
 NATIVE(Sys_audioPlay) { (void)t; (void)ret; if (vm.cfg.host.audio_play && a[0].i > 0) vm.cfg.host.audio_play(vm.cfg.host.user, a[0].i, a[1].i); }
@@ -230,9 +238,9 @@ NATIVE(Sys_tone) { (void)t; (void)ret; if (vm.cfg.host.tone) vm.cfg.host.tone(vm
 void midp_free(void) {
     net_shutdown_all();
     os_lock();
-    while (text_results) {
-        TextResult *r = text_results;
-        text_results = r->next;
+    while (INST->text_results) {
+        TextResult *r = INST->text_results;
+        INST->text_results = r->next;
         free(r->text);
         free(r);
     }

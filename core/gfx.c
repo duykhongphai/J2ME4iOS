@@ -379,10 +379,10 @@ typedef struct Glyph {
 } Glyph;
 
 #define GLYPH_BUCKETS 2048
-static Glyph *glyphs[GLYPH_BUCKETS];
+static J4I_TLS Glyph *glyphs[GLYPH_BUCKETS];
 typedef struct { int size, style, ascent, descent; } FontMetric;
-static FontMetric metrics[32];
-static int n_metrics;
+static J4I_TLS FontMetric metrics[32];
+static J4I_TLS int n_metrics;
 
 static FontMetric *font_metric(int size, int style) {
     style &= 3;
@@ -426,6 +426,8 @@ static Glyph *glyph_get(int cp, int size, int style) {
     }
     if (g->adv < 0) g->adv = 0;
     if (g->adv > g->aw) g->adv = g->aw;
+    if (vm.cfg.font_no_aa) /* crisp phone-style text */
+        for (int i = 0; i < g->aw * g->h; i++) g->alpha[i] = g->alpha[i] >= 110 ? 255 : 0;
     g->next = glyphs[hsh];
     glyphs[hsh] = g;
     return g;

@@ -17,6 +17,7 @@
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <mmsystem.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -349,6 +350,64 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(h, msg, wp, lp);
 }
 
+/* ---------------- audio (dev harness): WAV only, one sound at a time via PlaySound ---------------- */
+#define MAX_CLIPS 64
+static struct { uint8_t *wav; int len; double seconds; } clips[MAX_CLIPS];
+static int playing_clip;
+static double playing_until; /* seconds since start, < 0 = looping */
+
+static double now_s(void) {
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return (double)(t.QuadPart - t_start.QuadPart) / t_freq.QuadPart;
+}
+
+static int win_audio_create(void *u, const uint8_t *data, int len, const char *mime) {
+    (void)u;
+    (void)mime;
+    if (len < 44 || memcmp(data, "RIFF", 4) || memcmp(data + 8, "WAVE", 4)) return 0;
+    for (int h = 1; h < MAX_CLIPS; h++) {
+        if (clips[h].wav) continue;
+        clips[h].wav = (uint8_t *)malloc(len);
+        memcpy(clips[h].wav, data, len);
+        clips[h].len = len;
+        uint32_t byterate = data[28] | (data[29] << 8) | (data[30] << 16) | ((uint32_t)data[31] << 24);
+        clips[h].seconds = byterate ? (double)(len - 44) / byterate : 0;
+        return h;
+    }
+    return 0;
+}
+
+static void win_audio_play(void *u, int h, int loops) {
+    (void)u;
+    if (h <= 0 || h >= MAX_CLIPS || !clips[h].wav) return;
+    PlaySoundA((LPCSTR)clips[h].wav, NULL, SND_MEMORY | SND_ASYNC | SND_NODEFAULT | (loops != 1 ? SND_LOOP : 0));
+    playing_clip = h;
+    playing_until = loops != 1 ? -1 : now_s() + clips[h].seconds;
+}
+
+static void win_audio_stop(void *u, int h) {
+    (void)u;
+    if (h == playing_clip) {
+        PlaySoundA(NULL, NULL, 0);
+        playing_clip = 0;
+    }
+}
+
+static void win_audio_close(void *u, int h) {
+    win_audio_stop(u, h);
+    if (h > 0 && h < MAX_CLIPS) {
+        free(clips[h].wav);
+        clips[h].wav = NULL;
+    }
+}
+
+static int win_audio_is_playing(void *u, int h) {
+    (void)u;
+    if (h != playing_clip || !h) return 0;
+    return playing_until < 0 || now_s() < playing_until;
+}
+
 static DWORD WINAPI vm_thread(LPVOID p) {
     (void)p;
     j4i_run(&cfg);
@@ -376,7 +435,9 @@ int main(int argc, char **argv) {
     if (slash) strcpy(slash + 1, "j4i-runtime.jar");
 
     bool headless = false;
+    char *props = NULL;
     memset(&cfg, 0, sizeof cfg);
+    cfg.midi_synth = 1;
     cfg.runtime_jar = runtime;
     cfg.screen_w = 240;
     cfg.screen_h = 320;
@@ -393,6 +454,18 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--midlet") && i + 1 < argc) cfg.midlet_index = atoi(argv[++i]);
         else if (!strcmp(a, "--headless")) headless = true;
         else if (!strcmp(a, "--script") && i + 1 < argc) script = argv[++i];
+        else if (!strcmp(a, "--jad") && i + 1 < argc) cfg.jad_path = argv[++i];
+        else if (!strcmp(a, "--proxy") && i + 1 < argc) cfg.proxy = argv[++i];
+        else if (!strcmp(a, "--prop") && i + 1 < argc) {
+            size_t ol = props ? strlen(props) : 0, nl = strlen(argv[i + 1]);
+            props = (char *)realloc(props, ol + nl + 2);
+            memcpy(props + ol, argv[++i], nl);
+            props[ol + nl] = '\n';
+            props[ol + nl + 1] = 0;
+            cfg.sys_props = props;
+        } else if (!strcmp(a, "--font") && i + 1 < argc) sscanf(argv[++i], "%d,%d,%d", &cfg.font_small, &cfg.font_medium, &cfg.font_large);
+        else if (!strcmp(a, "--no-aa")) cfg.font_no_aa = 1;
+        else if (!strcmp(a, "--host-midi")) cfg.midi_synth = 0;
         else if (a[0] != '-') cfg.game_jar = a;
         else {
             fprintf(stderr, "unknown option %s\n", a);
@@ -412,6 +485,13 @@ int main(int argc, char **argv) {
     cfg.host.font_metrics = host_font_metrics;
     cfg.host.glyph = host_glyph;
     cfg.host.exited = host_exited;
+    if (!headless) {
+        cfg.host.audio_create = win_audio_create;
+        cfg.host.audio_play = win_audio_play;
+        cfg.host.audio_stop = win_audio_stop;
+        cfg.host.audio_close = win_audio_close;
+        cfg.host.audio_is_playing = win_audio_is_playing;
+    }
 
     if (script) CloseHandle(CreateThread(NULL, 0, script_thread, NULL, 0, NULL));
 

@@ -25,6 +25,8 @@ jobs:
         run: bash tests/run_lang_test.sh "$PWD/build/j4i-headless"
       - name: File, tone and vendor API tests
         run: bash tests/run_io_test.sh "$PWD/build/j4i-headless"
+      - name: Several VMs at once, proxies
+        run: bash tests/run_multi_test.sh "$PWD/build/j4i-headless"
 
   ios:
     name: iOS app (unsigned IPA)

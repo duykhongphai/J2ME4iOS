@@ -53,7 +53,21 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - com.sun.java-archive
+          - CFBundleTypeName: Java Application Descriptor
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - com.sun.java-app-descriptor
         UTImportedTypeDeclarations:
+          - UTTypeIdentifier: com.sun.java-app-descriptor
+            UTTypeDescription: Java Application Descriptor
+            UTTypeConformsTo:
+              - public.text
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - jad
+              public.mime-type:
+                - text/vnd.sun.j2me.app-descriptor
           - UTTypeIdentifier: com.sun.java-archive
             UTTypeDescription: Java Archive
             UTTypeConformsTo:

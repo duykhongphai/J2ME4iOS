@@ -245,10 +245,40 @@ typedef struct VM {
 
     char *manifest; /* raw manifest text */
     char *jad_props;
+    char *sys_props; /* "key: value" lines */
     int trace;
+    bool fs_ready;   /* virtual file system root created */
 } VM;
 
-extern VM vm;
+/* Thread-local storage: every VM instance runs on its own OS thread, so per-VM state
+ * that is only touched by the VM thread lives in thread-local variables. */
+#if defined(_MSC_VER) && !defined(__clang__)
+#define J4I_TLS __declspec(thread)
+#else
+#define J4I_TLS _Thread_local
+#endif
+
+typedef struct TextResult {
+    int id;
+    char *text;
+    bool cancelled;
+    struct TextResult *next;
+} TextResult;
+
+#define EVQ 512
+/* One VM. The parts shared with host threads (events, text input, exit) live here. */
+struct J4IInstance {
+    VM vm_state; /* must be first */
+    int evq[EVQ][3];
+    int ev_head, ev_tail;
+    TextResult *text_results;
+    volatile int64_t force_exit_at;
+    volatile int running;
+};
+
+extern J4I_TLS VM *vm_ptr;
+#define vm (*vm_ptr)
+#define INST ((J4IInstance *)vm_ptr)
 
 /* ---- util.c ---- */
 void *meta_alloc(size_t n);
@@ -385,6 +415,7 @@ bool events_pop(int *ev);
 bool events_pending(void);
 void events_reset(void);
 void events_wakeup(void);
+J4IInstance *vm_default_instance(void);
 int64_t vm_now(void);
 
 /* ---- natives ---- */
@@ -394,6 +425,9 @@ void natives_lang_register(void);
 void natives_midp_register(void);
 void natives_io_register(void);
 void m3g_register(void);
+uint8_t *midi_render_wav(const uint8_t *data, int len, int *out_len);
+const uint8_t *midi_cached_wav(const uint8_t *data, int len, int *out_len);
+void midi_cache_free(void);
 void native_register(const char *cls, const char *name, const char *desc, NativeFn fn);
 void midp_free(void);
 char *text_input_take(int id, bool *found);
