@@ -71,3 +71,23 @@ jobs:
         with:
           name: J2ME4iOS-unsigned-ipa
           path: build/J2ME4iOS-unsigned.ipa
+
+  release:
+    name: GitHub release (tags v*)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [core-linux, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: J2ME4iOS-unsigned-ipa
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/J2ME4iOS-unsigned.ipa
+          generate_release_notes: true
+          body: |
+            Unsigned IPA of J2ME4iOS. Install it with Sideloadly, AltStore or TrollStore (see the README).
+            Apps signed with a free Apple ID need Developer Mode on iOS 16 and later.

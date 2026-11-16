@@ -1,33 +1,31 @@
 # J2ME4iOS
 
-Trình chạy game J2ME (MIDP 2.0 / CLDC 1.1) cho iOS, viết từ đầu:
+A J2ME (MIDP 2.0 / CLDC 1.1) game runner for iOS, written from scratch:
 
-- máy ảo Java thông dịch viết bằng C thuần, không dùng JIT nên hợp lệ trên iOS,
-- thư viện CLDC/MIDP viết lại bằng Java,
-- vỏ app iOS viết bằng Objective-C.
+- a Java bytecode **interpreter in portable C** (no JIT, so it is allowed on iOS),
+- the CLDC/MIDP class library **reimplemented in Java**,
+- an **Objective-C** iOS app around it.
 
-> Trạng thái: **bản thử nghiệm (MVP)**. Lõi máy ảo đã qua bộ test so sánh với JVM thật. Phần MIDP 2D đã chạy được MIDlet test trên Windows. App iOS chưa được chạy thử trên máy thật.
+> Status: **early preview**. The VM passes a test suite compared against a real JVM, and the MIDP, M3G and
+> Mascot Capsule test MIDlets render correctly on the Windows development build. The iOS app builds in CI but
+> has had little testing on real devices yet. The app's interface is in Vietnamese.
 
-## Cấu trúc
+## Install on iPhone
 
-| Thư mục | Nội dung |
-|---|---|
-| `core/` | Máy ảo (C11, chạy được trên mọi nền tảng): đọc JAR/class, bộ thông dịch, GC, green thread, natives, đồ họa 2D, giải mã PNG |
-| `runtime/src/` | Thư viện Java: `java.lang/util/io`, `javax.microedition.*` (lcdui, game, rms, media, io), `com.nokia.mid.*`, cầu nối `j4i.*` |
-| `platform/ios/` | App iOS: danh sách game, bàn phím ảo, cảm ứng, CoreText, AVFoundation; cấu hình XcodeGen trong `project.yml` |
-| `platform/desktop/` | Bản chạy trên Windows có cửa sổ, kèm chế độ chạy không cửa sổ có kịch bản phím và chụp màn hình, dùng để phát triển/test |
-| `platform/headless/` | Bản chạy dòng lệnh, dùng trên mọi OS, chạy trong CI |
-| `tests/` | `lang/LangTest.java` (so kết quả với JVM thật), `midp/TestMidlet.java` (test hình ảnh) |
+1. Download `J2ME4iOS-unsigned.ipa` from the latest [release](../../releases)
+   (or from the **Artifacts** of the latest run in the **Actions** tab).
+2. Install it with **Sideloadly** or **AltStore** (they sign the IPA with your Apple ID), or **TrollStore**
+   on devices that support it.
 
-## Lấy bản IPA để cài lên iPhone
+Notes on sideloading:
 
-1. Push code lên GitHub. Workflow `.github/workflows/build.yml` sẽ build:
-   - job **core-linux**: build lõi máy ảo và chạy test ngôn ngữ,
-   - job **ios**: tạo file `J2ME4iOS-unsigned.ipa`.
-2. Vào tab **Actions** → chọn lần chạy mới nhất → mục **Artifacts** → tải `J2ME4iOS-unsigned-ipa`.
-3. Cài bằng **Sideloadly** hoặc **AltStore** (chúng tự ký IPA bằng Apple ID của bạn), hoặc **TrollStore** nếu máy hỗ trợ.
+- On iOS 16 and later, apps signed with a free Apple ID (development certificate) only start after enabling
+  **Settings → Privacy & Security → Developer Mode**. This is an iOS rule for every sideloaded app; J2ME4iOS
+  needs no special entitlement. TrollStore installs or Ad Hoc signing with a paid developer account do not need it.
+- With a free Apple ID the app expires after 7 days and has to be refreshed (AltStore can do this
+  automatically). Saved games are kept when the app is reinstalled over itself.
 
-Nếu có máy Mac thì build trực tiếp:
+Building on a Mac instead:
 
 ```bash
 bash tools/prepare_ios.sh
@@ -37,69 +35,86 @@ bash tools/prepare_ios.sh
 cd platform/ios && xcodegen generate && open J2ME4iOS.xcodeproj
 ```
 
-Sau đó chọn Team ký ứng dụng trong Xcode và bấm Run.
+Then choose a signing team in Xcode and press Run.
 
-## Dùng app trên iPhone
+## Using the app
 
-- **Nhập game:** có ba cách:
-  - bấm **+** để chọn file `.jar` (chọn kèm `.jad` nếu game có);
-  - chép file vào thư mục *J2ME4iOS* trong app **Tệp (Files)**;
-  - dùng "Mở bằng" từ app khác.
+- **Adding games:**
+  - tap **+** and pick a `.jar` (pick its `.jad` too if the game has one);
+  - or copy files into the *J2ME4iOS* folder in the **Files** app;
+  - or use "Open in…" from another app.
 
-  File `.jad` được nhận ra khi trùng tên với `.jar`, hoặc khi dòng `MIDlet-Jar-URL` trong JAD trỏ đến file `.jar` đó.
-- **Chạm vào game** để mở menu: chơi, **Cài đặt game…**, đổi tên, xoá dữ liệu lưu.
-- **Cài đặt game** (lưu riêng cho từng game):
-  - **Màn hình:**
-    - độ phân giải (có thể nhập tuỳ ý);
-    - hướng màn hình;
-    - kiểu phóng to: vừa khung / số nguyên / kéo giãn / gốc 1×;
-    - làm mịn ảnh, màu nền, hiện FPS.
-  - **Bàn phím:**
-    - hiện / ẩn / tự động (ẩn khi có tay cầm hoặc bàn phím rời);
-    - kiểu điện thoại hoặc kiểu tay cầm (cần 8 hướng);
-    - độ đậm phím khi xoay ngang, rung nhẹ khi bấm.
-  - **Chữ:** cỡ chữ nhỏ / vừa / lớn, bật/tắt khử răng cưa.
-  - **Hệ thống:** tên máy giả lập (`microedition.platform`, ví dụ Nokia, Sony Ericsson, Samsung) và thuộc tính hệ thống thêm (`key=value; key2=value2`).
-- **Bàn phím ảo:**
-  - Có thể trượt ngón tay giữa các phím: phím cũ tự nhả, phím mới được bấm.
-  - Kiểu tay cầm có cần điều khiển 8 hướng (nghiêng chéo sẽ bấm 2 phím mũi tên cùng lúc).
-  - Có thể chạm trực tiếp lên màn hình game.
-- **Bàn phím rời:**
-  - mũi tên; Enter/Space = OK; Q/F1 và W/F2 = phím mềm;
-  - 0–9; E = `*`; R = `#`; Backspace = C;
-  - Esc hoặc M mở menu.
-- **Tay cầm** (MFi, Xbox, PlayStation):
-  - D-pad / cần trái = mũi tên; cần phải = 2/4/6/8;
-  - nút Home mở menu;
-  - các nút còn lại đổi được trong **⚙︎ Cài đặt** ở màn hình danh sách game.
-- **Nút `☰`** mở menu trong game:
-  - ẩn/hiện bàn phím, đổi kiểu bàn phím;
-  - kiểu phóng to, làm mịn ảnh;
-  - âm lượng, FPS;
-  - **Xem log** (chép/chia sẻ khi báo lỗi);
-  - thoát.
-- **Nhạc MIDI:**
-  - Mặc định phát bằng bộ tổng hợp tích hợp, không cần cài thêm gì.
-  - Nếu chép một soundfont `.sf2`/`.dls` (ví dụ GeneralUser GS) vào thư mục J2ME4iOS, chế độ "Tự động" sẽ dùng soundfont cho tiếng hay hơn.
-  - Đổi chế độ trong **⚙︎ Cài đặt**.
-- **Nhiều game cùng lúc:**
-  - Menu `☰` → **Về danh sách (game vẫn chạy)**: game tiếp tục chạy nền (giữ kết nối mạng). Mục **Đang chạy** ở đầu danh sách để quay lại.
-  - **Chuyển sang game khác…** đổi thẳng giữa các game đang chạy.
-  - Mỗi game là một máy ảo riêng, chiếm khoảng 64 MB bộ nhớ; app cảnh báo khi mở quá 4 game.
-  - Mặc định chỉ game đang hiện mới có tiếng. Đổi trong **⚙︎ Cài đặt → Game chạy nền vẫn phát tiếng**.
-- **Khe lưu:**
-  - Mỗi game có 5 khe lưu, mỗi khe có RecordStore và file riêng (ví dụ mỗi khe một tài khoản).
-  - Chọn khe qua **Chơi ở khe lưu khác…**; có thể chạy nhiều khe của cùng một game cùng lúc.
-  - Khe 1 là dữ liệu lưu gốc của game.
-- **Proxy theo khe:** trong **Cài đặt game → Mạng**, mỗi khe có thể có proxy riêng. Mọi kết nối socket và HTTP của game ở khe đó sẽ đi qua proxy này. Các dạng hỗ trợ:
+  A `.jad` is matched to a `.jar` with the same name, or through its `MIDlet-Jar-URL` line.
+- **Tap a game** for its menu: play, **Cài đặt game…** (game settings), rename, delete saved data.
+- **Game settings** (stored per game):
+  - **Screen:**
+    - resolution (any size can be typed in);
+    - orientation;
+    - scaling: fit / whole multiples / stretch / native 1×;
+    - smoothing, background color, FPS counter.
+  - **Keypad:**
+    - shown / hidden / automatic (hidden while a controller or hardware keyboard is connected);
+    - phone layout or gamepad layout (8-way joystick);
+    - key opacity in landscape, haptic feedback.
+  - **Text:** small / medium / large font sizes, anti-aliasing on or off.
+  - **System:** emulated phone model (`microedition.platform`, e.g. Nokia, Sony Ericsson, Samsung) and extra
+    system properties (`key=value; key2=value2`).
+  - **Network:** a proxy for each save slot (see below).
+- **On-screen keypad:**
+  - fingers can slide between keys: the old key is released and the new one pressed;
+  - the gamepad layout has an 8-way joystick (diagonals press two arrow keys);
+  - the game screen itself is touch enabled.
+- **Hardware keyboard:**
+  - arrows; Enter/Space = fire; Q/F1 and W/F2 = soft keys;
+  - 0–9; E = `*`; R = `#`; Backspace = clear;
+  - Esc or M opens the game menu.
+- **Game controllers** (MFi, Xbox, PlayStation):
+  - D-pad / left stick = arrows; right stick = 2/4/6/8;
+  - the Home button opens the game menu;
+  - the other buttons can be remapped in **⚙︎ Settings** on the game list.
+- **The `☰` button** opens the in-game menu:
+  - show/hide the keypad, switch keypad layout;
+  - scaling, smoothing;
+  - volume, FPS counter;
+  - **Xem log** (view log: copy or share it when reporting a problem);
+  - back to the game list, switch game, quit.
+- **MIDI music:**
+  - played by the built-in synthesizer by default, nothing to install;
+  - if a `.sf2`/`.dls` soundfont (for example GeneralUser GS) is copied into the J2ME4iOS folder, the
+    "automatic" mode uses it for better sound;
+  - the mode is chosen in **⚙︎ Settings**.
+- **Several games at once:**
+  - `☰` → **Về danh sách (game vẫn chạy)** returns to the game list while the game keeps running
+    (network connections stay open). The **Đang chạy** (running) section at the top of the list brings it back.
+  - **Chuyển sang game khác…** switches directly between running games.
+  - Each game is its own VM using about 64 MB of memory; the app warns when more than 4 are open.
+  - Only the game on screen plays sound, unless **⚙︎ Settings → background games keep playing sound** is on.
+- **Save slots:**
+  - each game has 5 save slots, each with its own RecordStores and files (for example one account per slot);
+  - pick a slot with **Chơi ở khe lưu khác…** (play in another slot); several slots of the same game can run at once;
+  - slot 1 is the game's original save data.
+- **Proxy per save slot:** in **Game settings → Network**, each slot can have its own proxy. All socket and HTTP
+  connections of the game in that slot go through it. Supported forms:
   - `socks5://user:pass@host:port`,
-  - `socks5h://...` (proxy tự phân giải tên miền),
+  - `socks5h://...` (the proxy resolves host names),
   - `http://host:port` (HTTP CONNECT).
-- **Dữ liệu lưu** nằm trong `Library/Application Support/RMS/<tên jar>/`. Khe 2–5 nằm ở `<tên jar>#2` … `<tên jar>#5`.
+- **Saved data** lives in `Library/Application Support/RMS/<jar name>/`; slots 2–5 in `<jar name>#2` … `<jar name>#5`.
 
-## Build và test trên Windows
+## Layout
 
-Cần Visual Studio có C++ (MSVC), CMake, Ninja và JDK ≥ 9.
+| Folder | Contents |
+|---|---|
+| `core/` | The VM (portable C11): JAR/class loading, interpreter, GC, green threads, natives, 2D rasterizer, PNG decoder, 3D rasterizer, MIDI synthesizer, sockets and proxies |
+| `runtime/src/` | Java library: `java.lang/util/io`, `javax.microedition.*`, `javax.microedition.m3g`, `com.mascotcapsule.micro3d.v3`, vendor APIs, `j4i.*` bridge |
+| `platform/ios/` | iOS app; XcodeGen spec in `project.yml` |
+| `platform/desktop/` | Windows runner with a window, plus a headless mode with key scripts and screenshots for development |
+| `platform/headless/` | Portable command-line runner used by CI (can run several VMs at once) |
+| `tests/` | VM tests compared against a real JVM, self-checking I/O tests, visual test MIDlets |
+| `tools/` | Build scripts |
+
+## Build and test on Windows
+
+Requires Visual Studio with C++ (MSVC), CMake, Ninja and a JDK ≥ 9.
 
 ```bash
 tools\build_win.bat
@@ -109,24 +124,26 @@ tools\build_win.bat
 build\j4i.exe path\to\game.jar
 ```
 
-- **Phím:** mũi tên; Enter/Space = OK; F1/Q = phím mềm trái; F2/W = phím mềm phải; 0–9; E = `*`; R = `#`; Backspace = C; F12 = chụp màn hình.
-- **Tuỳ chọn:**
+- **Keys:** arrows; Enter/Space = fire; F1/Q = left soft key; F2/W = right soft key; 0–9; E = `*`; R = `#`;
+  Backspace = clear; F12 = screenshot.
+- **Options:**
   - `--size 176x208`, `--heap 64`;
-  - `--trace 1` (in log GC/exception), `--trace 2` (log nạp class);
-  - `--jad game.jad`, `--prop microedition.platform=SonyEricssonK800i` (dùng được nhiều lần);
-  - `--font 10,13,18` (cỡ chữ nhỏ, vừa, lớn), `--no-aa` (tắt khử răng cưa chữ);
-  - `--host-midi` (tắt bộ tổng hợp MIDI tích hợp);
-  - `--proxy socks5://user:pass@host:port` (cũng nhận `socks5h://` và `http://`).
-- **Nhiều máy ảo cùng lúc** (bản `j4i-headless`): `--instances 4 --log-prefix out` chạy 4 máy ảo song song, mỗi máy ghi log vào `out.N.txt` và lưu dữ liệu vào `<data>/slotN`.
-- **Âm thanh trên Windows:** chỉ phát một âm thanh tại một thời điểm (WAV, hoặc MIDI qua bộ tổng hợp), đủ để thử game.
+  - `--trace 1` (GC/exception log), `--trace 2` (class loading log);
+  - `--jad game.jad`, `--prop microedition.platform=SonyEricssonK800i` (repeatable);
+  - `--font 10,13,18` (small, medium, large font sizes), `--no-aa` (no text anti-aliasing);
+  - `--host-midi` (disable the built-in MIDI synthesizer);
+  - `--proxy socks5://user:pass@host:port` (also `socks5h://` and `http://`).
+- **Several VMs at once** (`j4i-headless`): `--instances 4 --log-prefix out` runs 4 VMs in parallel; each logs to
+  `out.N.txt` and keeps its data in `<data>/slotN`.
+- **Sound on Windows:** one sound at a time (WAV, or MIDI through the synthesizer), enough for testing.
 
-Chạy không cửa sổ, có kịch bản phím và chụp màn hình (thời gian tính bằng mili giây):
+Headless run with a key script and screenshots (times in milliseconds):
 
 ```bash
 build\j4i.exe --headless --script "1500=shot:a.png,2000=k:-5,3000=shot:b.png,4000=quit" game.jar
 ```
 
-Chạy các bộ test:
+Test suites:
 
 ```bash
 bash tests/run_lang_test.sh
@@ -152,36 +169,43 @@ bash tests/build_m3g_test.sh
 bash tests/build_mascot_test.sh
 ```
 
-Các test hình ảnh tạo ra `build/tests/testmidlet.jar`, `m3gtest.jar` và `mascottest.jar`. Chạy chúng bằng `build\j4i.exe`. Trong `m3gtest.jar`, phím 1/2/3 để đổi cảnh.
+The visual tests produce `build/tests/testmidlet.jar`, `m3gtest.jar` and `mascottest.jar`; run them with
+`build\j4i.exe`. In `m3gtest.jar`, keys 1/2/3 switch scenes.
 
 ```bash
 build\j4i.exe build\tests\testmidlet.jar
 ```
 
-## Đã hỗ trợ
+## Supported
 
-- **CLDC 1.1:** toàn bộ bytecode (kể cả `jsr/ret` của class file cũ), exception, `synchronized`/`wait`/`notify`, thread, `Timer`, kiểu `float`/`double`, các class `String`/`StringBuffer`/`Vector`/`Hashtable`/`Calendar`.
+- **CLDC 1.1:** the whole instruction set (including `jsr/ret` from old compilers), exceptions,
+  `synchronized`/`wait`/`notify`, threads, `Timer`, `float`/`double`, `String`/`StringBuffer`/`Vector`/
+  `Hashtable`/`Calendar`.
 - **MIDP 2.0 lcdui:**
-  - `Canvas`, `Graphics` (đủ các hàm vẽ, `drawRegion` với 8 phép biến đổi, `drawRGB`, `copyArea`),
-  - `Image` (PNG mọi định dạng; JPEG trên iOS), `Font`,
-  - `Command` + phím mềm + menu,
-  - `Form`, `List`, `Alert`, `TextBox`, `TextField` (dùng bàn phím iOS), `ChoiceGroup`, `Gauge`, `StringItem`, `ImageItem`, `DateField`, `Spacer`, `CustomItem`.
-- **lcdui.game:** `GameCanvas`, `Sprite` (va chạm theo pixel), `TiledLayer`, `LayerManager`.
+  - `Canvas`, `Graphics` (all drawing calls, `drawRegion` with the 8 transforms, `drawRGB`, `copyArea`);
+  - `Image` (all PNG formats; JPEG on iOS), `Font`;
+  - `Command` with soft keys and an options menu;
+  - `Form`, `List`, `Alert`, `TextBox`, `TextField` (iOS keyboard), `ChoiceGroup`, `Gauge`, `StringItem`,
+    `ImageItem`, `DateField`, `Spacer`, `CustomItem`.
+- **lcdui.game:** `GameCanvas`, `Sprite` (pixel-level collisions), `TiledLayer`, `LayerManager`.
 - **3D:**
-  - **M3G (JSR-184):** scene graph đầy đủ, đọc file `.m3g` (kể cả phần nén zlib), animation (keyframe, SLERP), SkinnedMesh, MorphingMesh, Sprite3D, ánh sáng, sương mù, 2 lớp texture, hoà màu, `pick`.
-  - **Mascot Capsule v3** (`com.mascotcapsule.micro3d.v3`): đọc model MBAC, animation MTRA, texture BMP 8-bit; xương, pattern, ánh sáng, toon shading, các chế độ trong suốt, `renderPrimitives`, `drawCommandList`.
-  - Cả hai dùng chung bộ dựng hình phần mềm viết bằng C (`core/m3g.c`).
-- **Âm thanh:**
-  - `Manager`/`Player` cho WAV, MP3, MIDI. MIDI phát bằng bộ tổng hợp General MIDI tích hợp (`core/midi.c`), không cần soundfont.
-  - Chuỗi tone (`ToneControl`, file `.jts`) và `Manager.playTone`.
-  - Nhạc chuông Nokia (`Sound` dạng `FORMAT_TONE`/OTT).
-- **Lưu trữ:**
-  - **RMS:** `RecordStore` đầy đủ.
-  - **File (JSR-75):** `FileConnection`, `FileSystemRegistry`. Game chỉ thấy thư mục riêng `file:///root1/`.
-- **Mạng:**
-  - `HttpConnection` (http) và `SocketConnection`.
-  - `resource:` đọc file trong jar.
-- **API riêng của hãng:**
+  - **M3G (JSR-184):** full scene graph, `.m3g` loader (including zlib sections), keyframe animation (SLERP),
+    `SkinnedMesh`, `MorphingMesh`, `Sprite3D`, lighting, fog, two texture units, blending, `pick`.
+  - **Mascot Capsule v3** (`com.mascotcapsule.micro3d.v3`): MBAC models, MTRA animations, 8-bit BMP textures;
+    bones, patterns, lighting, toon shading, semi-transparent modes, `renderPrimitives`, `drawCommandList`.
+  - Both use the same software rasterizer written in C (`core/m3g.c`).
+- **Sound:**
+  - `Manager`/`Player` for WAV, MP3 and MIDI; MIDI goes through the built-in General MIDI synthesizer
+    (`core/midi.c`), no soundfont needed.
+  - Tone sequences (`ToneControl`, `.jts` files) and `Manager.playTone`.
+  - Nokia ringing tones (`Sound` with `FORMAT_TONE` / OTT).
+- **Storage:**
+  - **RMS:** complete `RecordStore`.
+  - **Files (JSR-75):** `FileConnection`, `FileSystemRegistry`; games only see their own `file:///root1/`.
+- **Network:**
+  - `HttpConnection` (http) and `SocketConnection`, optionally through a SOCKS5 / HTTP CONNECT proxy;
+  - `resource:` URLs for jar resources.
+- **Vendor APIs:**
   - **Nokia:** `FullCanvas`, `DirectUtils`, `DirectGraphics`, `DeviceControl`, `Sound`.
   - **Samsung:** `AudioClip`, `Vibration`, `LCDLight`, `SMS`.
   - **Siemens:**
@@ -191,20 +215,29 @@ build\j4i.exe build\tests\testmidlet.jar
     - lcdui: `Image`.
   - **Motorola:** `FunLight`, `Lighting`, `Vibrator`, `MidiPlayer`.
   - **LG:** `mmpp.media.MediaPlayer`.
-- **Có lớp nhưng chỉ báo "không hỗ trợ":** SMS/MMS (`javax.wireless.messaging`, gửi tin sẽ lỗi) và Bluetooth (`javax.bluetooth`). Game dùng các API này vẫn mở được, chỉ tính năng đó không chạy.
+- **Present but reporting "not supported":** SMS/MMS (`javax.wireless.messaging`; sending fails) and Bluetooth
+  (`javax.bluetooth`). Games using them still start; only that feature does not work.
+- **App:** JAD files, per-game settings, several games at once, save slots, per-slot proxies, game controllers,
+  hardware keyboards, log viewer.
 
-## Chưa hỗ trợ / sẽ làm tiếp
+## Not supported yet
 
-- **Mạng:** HTTPS. Cần thêm phần TLS trên iOS.
-- **Âm thanh:** AMR và SMAF/MMF (Samsung). Game vẫn chạy nhưng các âm thanh này sẽ im lặng.
-- **Mascot Capsule:** sphere map (hiệu ứng phản chiếu). Primitive dạng điểm và đường chưa được vẽ.
-- **Mascot Capsule và API hãng chưa thử với game thật:** mới chạy với dữ liệu tự sinh. Định dạng MBAC/MTRA không có tài liệu chính thức, nên có thể còn sai ở model thật. Nếu gặp lỗi, gửi kèm file game cho tôi.
-- **Thiếu hẳn:** Sony Ericsson (ngoài Mascot Capsule), Motorola `com.motorola.game.*`, LG `mmpp.phone`, `MathFP`.
+- **Network:** HTTPS (needs TLS on iOS).
+- **Sound:** AMR and SMAF/MMF (Samsung). Games run, these sounds are silent.
+- **Mascot Capsule:** sphere maps (reflections); point and line primitives are not drawn.
+- **Not yet tried with real games:** Mascot Capsule and the vendor APIs have only been run with generated
+  test data. There is no official MBAC/MTRA specification, so real models may still show problems.
+- **Missing:** Sony Ericsson APIs other than Mascot Capsule, Motorola `com.motorola.game.*`, LG `mmpp.phone`, `MathFP`.
 
-## Khi test, gửi lại cho tôi
+## Reporting a problem
 
-- Tên game và file `.jar` (nếu chia sẻ được).
-- Hiện tượng gặp phải: màn hình đen, lỗi, chạy chậm, sai hình, không có tiếng…
-- Log:
-  - **Trên Windows:** toàn bộ output khi chạy `build\j4i.exe --trace 1 game.jar`.
-  - **Trên iOS:** log có trong Console.app của Mac (lọc theo `J2ME4iOS`), hoặc màn hình báo lỗi hiện trong game.
+- The game's name and `.jar` (if it can be shared).
+- What happens: black screen, error, slow, wrong graphics, no sound…
+- The log:
+  - **iOS:** `☰` → **Xem log** → copy or share;
+  - **Windows:** the full output of `build\j4i.exe --trace 1 game.jar`.
+
+## Acknowledgements
+
+The MBAC/MTRA (Mascot Capsule) file formats were worked out with the help of the open-source
+[J2ME-Loader](https://github.com/nikita36078/J2ME-Loader) project (Apache-2.0); J2ME4iOS's implementation is its own.
