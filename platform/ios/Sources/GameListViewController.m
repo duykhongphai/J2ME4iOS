@@ -78,8 +78,7 @@ static NSString *const kGamesChanged = @"J4IGamesChanged";
 }
 
 - (NSString *)resolutionFor:(NSString *)file {
-    NSString *r = [[NSUserDefaults standardUserDefaults] stringForKey:[@"res:" stringByAppendingString:file]];
-    return r ?: @"240x320";
+    return J4IGameSetting(file, @"res", @"240x320");
 }
 
 #pragma mark - table
@@ -128,6 +127,30 @@ static NSString *const kGamesChanged = @"J4IGamesChanged";
     [ac addAction:[UIAlertAction actionWithTitle:@"Đổi độ phân giải…"
                                            style:UIAlertActionStyleDefault
                                          handler:^(UIAlertAction *a) { [self chooseResolution:file from:indexPath]; }]];
+    NSArray *orientKeys = @[@"auto", @"portrait", @"landscape"];
+    NSArray *orientNames = @[@"Tự động", @"Dọc", @"Ngang"];
+    NSString *orient = J4IGameSetting(file, @"orient", @"auto");
+    NSUInteger oi = [orientKeys indexOfObject:orient];
+    [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Hướng màn hình: %@…", orientNames[oi == NSNotFound ? 0 : oi]]
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) {
+                                             [self choose:@"Hướng màn hình khi chơi" key:@"orient" values:orientKeys names:orientNames file:file from:indexPath];
+                                         }]];
+    NSArray *scaleKeys = @[@"fit", @"integer", @"stretch"];
+    NSArray *scaleNames = @[@"Vừa khung", @"Số nguyên (nét nhất)", @"Kéo giãn"];
+    NSUInteger si = [scaleKeys indexOfObject:J4IGameSetting(file, @"scale", @"fit")];
+    [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Kiểu phóng to: %@…", scaleNames[si == NSNotFound ? 0 : si]]
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) {
+                                             [self choose:@"Kiểu phóng to màn hình game" key:@"scale" values:scaleKeys names:scaleNames file:file from:indexPath];
+                                         }]];
+    BOOL keypad = ![J4IGameSetting(file, @"keypad", @"1") isEqualToString:@"0"];
+    [ac addAction:[UIAlertAction actionWithTitle:keypad ? @"Ẩn bàn phím ảo (game cảm ứng)" : @"Hiện bàn phím ảo"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) {
+                                             J4ISetGameSetting(file, @"keypad", keypad ? @"0" : @"1");
+                                             [self.tableView reloadData];
+                                         }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Xoá dữ liệu lưu (RMS)"
                                            style:UIAlertActionStyleDestructive
                                          handler:^(UIAlertAction *a) {
@@ -135,6 +158,31 @@ static NSString *const kGamesChanged = @"J4IGamesChanged";
                                          }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    ac.popoverPresentationController.sourceView = cell ?: self.view;
+    ac.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
+    [self presentViewController:ac animated:YES completion:nil];
+}
+
+- (void)choose:(NSString *)title
+           key:(NSString *)key
+        values:(NSArray<NSString *> *)values
+         names:(NSArray<NSString *> *)names
+          file:(NSString *)file
+          from:(NSIndexPath *)indexPath {
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:title message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSString *cur = J4IGameSetting(file, key, values.firstObject);
+    for (NSUInteger i = 0; i < values.count; i++) {
+        NSString *v = values[i];
+        NSString *label = [v isEqualToString:cur] ? [names[i] stringByAppendingString:@" ✓"] : names[i];
+        [ac addAction:[UIAlertAction actionWithTitle:label
+                                               style:UIAlertActionStyleDefault
+                                             handler:^(UIAlertAction *a) {
+                                                 J4ISetGameSetting(file, key, v);
+                                                 [self.tableView reloadData];
+                                             }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:indexPath];
     ac.popoverPresentationController.sourceView = cell ?: self.view;
     ac.popoverPresentationController.sourceRect = cell ? cell.bounds : self.view.bounds;
     [self presentViewController:ac animated:YES completion:nil];
@@ -149,7 +197,7 @@ static NSString *const kGamesChanged = @"J4IGamesChanged";
         [ac addAction:[UIAlertAction actionWithTitle:o
                                                style:UIAlertActionStyleDefault
                                              handler:^(UIAlertAction *a) {
-                                                 [[NSUserDefaults standardUserDefaults] setObject:o forKey:[@"res:" stringByAppendingString:file]];
+                                                 J4ISetGameSetting(file, @"res", o);
                                                  [self.tableView reloadData];
                                              }]];
     }

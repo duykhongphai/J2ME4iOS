@@ -23,6 +23,8 @@ jobs:
           test -x build/j4i-headless
       - name: Language tests (JVM vs J2ME4iOS)
         run: bash tests/run_lang_test.sh "$PWD/build/j4i-headless"
+      - name: File, tone and vendor API tests
+        run: bash tests/run_io_test.sh "$PWD/build/j4i-headless"
 
   ios:
     name: iOS app (unsigned IPA)

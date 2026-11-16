@@ -30,4 +30,18 @@ public final class J4IBridge {
     public static int[] targetPixels(Graphics g) { return g.pix; }
 
     public static int targetWidth(Graphics g) { return g.pw; }
+
+    public static int targetHeight(Graphics g) { return g.ph; }
+
+    /** Absolute clip rectangle {x0, y0, x1, y1} (exclusive) and translation {tx, ty}. */
+    public static void clipAndTranslate(Graphics g, int[] out6) {
+        out6[0] = g.cx0;
+        out6[1] = g.cy0;
+        out6[2] = g.cx1;
+        out6[3] = g.cy1;
+        out6[4] = g.tx;
+        out6[5] = g.ty;
+    }
+
+    public static boolean isMutable(Image img) { return img.mutable; }
 }

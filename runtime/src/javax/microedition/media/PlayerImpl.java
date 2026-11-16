@@ -7,8 +7,9 @@ import javax.microedition.media.control.VolumeControl;
 final class PlayerImpl implements Player, VolumeControl, ToneControl {
     private static final Vector active = new Vector();
 
-    private final byte[] data;
-    private final String type;
+    private byte[] data;
+    private String type;
+    private byte[] toneSeq;
     private int state = UNREALIZED;
     private int loops = 1;
     private int handle;
@@ -21,6 +22,10 @@ final class PlayerImpl implements Player, VolumeControl, ToneControl {
     PlayerImpl(byte[] data, String type) {
         this.data = data;
         this.type = type;
+        if ("audio/x-tone-seq".equals(type)) {
+            toneSeq = data;
+            this.data = null;
+        }
     }
 
     private void checkClosed() {
@@ -36,8 +41,15 @@ final class PlayerImpl implements Player, VolumeControl, ToneControl {
         checkClosed();
         realize();
         if (state == REALIZED) {
+            if (handle == 0 && data == null && toneSeq != null) {
+                try {
+                    data = j4i.ToneSeq.toWav(toneSeq);
+                } catch (IllegalArgumentException e) {
+                    throw new MediaException("Bad tone sequence: " + e.getMessage());
+                }
+            }
             if (handle == 0 && data != null) {
-                handle = j4i.Sys.audioCreate(data, type);
+                handle = j4i.Sys.audioCreate(data, toneSeq != null ? "audio/x-wav" : type);
                 if (handle > 0) j4i.Sys.audioVolume(handle, muted ? 0 : level);
             }
             state = PREFETCHED;
@@ -160,6 +172,10 @@ final class PlayerImpl implements Player, VolumeControl, ToneControl {
     /* ToneControl */
     public void setSequence(byte[] sequence) {
         if (sequence == null) throw new IllegalArgumentException();
+        if (state >= PREFETCHED) throw new IllegalStateException("Player is prefetched");
+        j4i.ToneSeq.toWav(sequence); /* validate */
+        toneSeq = sequence;
+        data = null;
     }
 
     private void checkEnd() {

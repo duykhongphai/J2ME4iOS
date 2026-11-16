@@ -290,3 +290,10 @@ void sched_loop(void) {
         os_unlock();
     }
 }
+
+/* Wake the scheduler from another OS thread (network workers, audio callbacks). */
+void events_wakeup(void) {
+    os_lock();
+    os_cond_signal();
+    os_unlock();
+}

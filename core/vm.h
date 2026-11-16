@@ -280,6 +280,24 @@ int os_mkdirs(const char *path);
 typedef void (*os_dir_cb)(void *ctx, const char *name);
 int os_list_dir(const char *path, os_dir_cb cb, void *ctx);
 int os_tz_offset_ms(void);
+/* ---- osfs.c ---- */
+int os_stat(const char *path, int *is_dir, int64_t *size, int64_t *mtime_ms);
+int os_rename(const char *from, const char *to);
+int os_rmdir(const char *path);
+typedef void (*os_dir_ex_cb)(void *ctx, const char *name, bool is_dir);
+int os_list_dir_ex(const char *path, os_dir_ex_cb cb, void *ctx);
+int os_write_at(const char *path, const void *data, size_t len, bool append);
+int os_truncate(const char *path, int64_t len);
+int64_t os_free_space(const char *path);
+int os_thread_start(void (*fn)(void *), void *arg);
+int net_connect(const char *host, int port);
+int net_state(int id);
+int net_read(int id, uint8_t *dst, int len);
+int net_available(int id);
+int net_write(int id, const uint8_t *src, int len);
+void net_close(int id);
+int net_address(int id, bool local, char *out, int outlen);
+void net_shutdown_all(void);
 
 /* ---- zip.c ---- */
 Zip *zip_open_file(const char *path);
@@ -366,6 +384,7 @@ void sched_loop(void);
 bool events_pop(int *ev);
 bool events_pending(void);
 void events_reset(void);
+void events_wakeup(void);
 int64_t vm_now(void);
 
 /* ---- natives ---- */
@@ -373,6 +392,8 @@ void natives_init(void);
 NativeFn native_lookup(Method *m);
 void natives_lang_register(void);
 void natives_midp_register(void);
+void natives_io_register(void);
+void m3g_register(void);
 void native_register(const char *cls, const char *name, const char *desc, NativeFn fn);
 void midp_free(void);
 char *text_input_take(int id, bool *found);

@@ -42,8 +42,14 @@ Sau đó chọn Team ký ứng dụng trong Xcode và bấm Run.
 ## Dùng app trên iPhone
 
 - **Nhập game:** bấm **+** để chọn file `.jar`, hoặc chép `.jar` vào thư mục *J2ME4iOS* trong app **Tệp (Files)**, hoặc dùng "Mở bằng" từ app khác.
-- **Chạm vào game** để chơi, đổi độ phân giải (mặc định 240x320) hoặc xoá dữ liệu lưu.
-- **Bàn phím ảo:** phím mềm trái/phải, D-pad, OK, 0–9, `*`, `#`, `C`. Nút `☰` để thoát game. Có thể chạm trực tiếp lên màn hình game. Hỗ trợ bàn phím rời: phím mũi tên, Enter, số, F1/F2 (phím mềm).
+- **Chạm vào game** để chơi hoặc chỉnh riêng cho từng game:
+  - độ phân giải (mặc định 240x320),
+  - hướng màn hình: tự động / dọc / ngang,
+  - kiểu phóng to: vừa khung / số nguyên (nét nhất) / kéo giãn,
+  - ẩn bàn phím ảo (cho game cảm ứng),
+  - xoá dữ liệu lưu.
+- **Bàn phím ảo:** phím mềm trái/phải, D-pad, OK, 0–9, `*`, `#`, `C`. Có thể chạm trực tiếp lên màn hình game. Hỗ trợ bàn phím rời: phím mũi tên, Enter, số, F1/F2 (phím mềm).
+- **Nút `☰`** mở menu trong game: thoát, ẩn/hiện bàn phím, đổi kiểu phóng to, bật/tắt làm mịn ảnh. Khi ẩn bàn phím, nút `☰` nằm ở góc trên bên phải.
 - **Nhạc MIDI:** iOS cần soundfont. Chép một file `.sf2` hoặc `.dls` (ví dụ GeneralUser GS) vào thư mục J2ME4iOS trong app Tệp. Âm thanh WAV/MP3 chạy được ngay.
 - **Dữ liệu lưu (RecordStore)** nằm trong `Library/Application Support/RMS/<tên jar>/`.
 
@@ -75,8 +81,22 @@ bash tests/run_lang_test.sh
 ```
 
 ```bash
+bash tests/run_io_test.sh
+```
+
+```bash
 bash tests/build_test_midlet.sh
 ```
+
+```bash
+bash tests/build_m3g_test.sh
+```
+
+```bash
+bash tests/build_mascot_test.sh
+```
+
+Các test hình ảnh tạo ra `build/tests/testmidlet.jar`, `m3gtest.jar` và `mascottest.jar`. Chạy chúng bằng `build\j4i.exe`. Trong `m3gtest.jar`, phím 1/2/3 để đổi cảnh.
 
 ```bash
 build\j4i.exe build\tests\testmidlet.jar
@@ -91,18 +111,39 @@ build\j4i.exe build\tests\testmidlet.jar
   - `Command` + phím mềm + menu,
   - `Form`, `List`, `Alert`, `TextBox`, `TextField` (dùng bàn phím iOS), `ChoiceGroup`, `Gauge`, `StringItem`, `ImageItem`, `DateField`, `Spacer`, `CustomItem`.
 - **lcdui.game:** `GameCanvas`, `Sprite` (va chạm theo pixel), `TiledLayer`, `LayerManager`.
-- **Khác:**
+- **3D:**
+  - **M3G (JSR-184):** scene graph đầy đủ, đọc file `.m3g` (kể cả phần nén zlib), animation (keyframe, SLERP), SkinnedMesh, MorphingMesh, Sprite3D, ánh sáng, sương mù, 2 lớp texture, hoà màu, `pick`.
+  - **Mascot Capsule v3** (`com.mascotcapsule.micro3d.v3`): đọc model MBAC, animation MTRA, texture BMP 8-bit; xương, pattern, ánh sáng, toon shading, các chế độ trong suốt, `renderPrimitives`, `drawCommandList`.
+  - Cả hai dùng chung bộ dựng hình phần mềm viết bằng C (`core/m3g.c`).
+- **Âm thanh:**
+  - `Manager`/`Player` cho WAV, MP3, MIDI.
+  - Chuỗi tone (`ToneControl`, file `.jts`) và `Manager.playTone`.
+  - Nhạc chuông Nokia (`Sound` dạng `FORMAT_TONE`/OTT).
+- **Lưu trữ:**
   - **RMS:** `RecordStore` đầy đủ.
-  - **Âm thanh:** `Manager`/`Player` cho WAV, MP3, MIDI.
-  - **API Nokia:** `FullCanvas`, `DirectUtils`, `DirectGraphics`, `DeviceControl`, `Sound`.
+  - **File (JSR-75):** `FileConnection`, `FileSystemRegistry`. Game chỉ thấy thư mục riêng `file:///root1/`.
+- **Mạng:**
+  - `HttpConnection` (http) và `SocketConnection`.
+  - `resource:` đọc file trong jar.
+- **API riêng của hãng:**
+  - **Nokia:** `FullCanvas`, `DirectUtils`, `DirectGraphics`, `DeviceControl`, `Sound`.
+  - **Samsung:** `AudioClip`, `Vibration`, `LCDLight`, `SMS`.
+  - **Siemens:**
+    - game: `ExtendedImage`, `Sprite`, `TiledBackground`, `GraphicObjectManager`, `Melody`, `Sound`, `Light`, `Vibrator`;
+    - `color_game.*`;
+    - io: `File`;
+    - lcdui: `Image`.
+  - **Motorola:** `FunLight`, `Lighting`, `Vibrator`, `MidiPlayer`.
+  - **LG:** `mmpp.media.MediaPlayer`.
+- **Có lớp nhưng chỉ báo "không hỗ trợ":** SMS/MMS (`javax.wireless.messaging`, gửi tin sẽ lỗi) và Bluetooth (`javax.bluetooth`). Game dùng các API này vẫn mở được, chỉ tính năng đó không chạy.
 
 ## Chưa hỗ trợ / sẽ làm tiếp
 
-- **3D:** M3G (JSR-184) và Mascot Capsule.
-- **API riêng của hãng:** Samsung, Siemens, Sony Ericsson, Motorola.
-- **Kết nối:** mạng (`HttpConnection`, socket) và file (JSR-75).
-- **Âm thanh:** chuỗi tone (`ToneControl`) và AMR.
-- **Màn hình:** tự động phóng to/thu nhỏ khi game đổi kích thước, chế độ xoay ngang riêng cho từng game.
+- **Mạng:** HTTPS. Cần thêm phần TLS trên iOS.
+- **Âm thanh:** AMR và SMAF/MMF (Samsung). Game vẫn chạy nhưng các âm thanh này sẽ im lặng.
+- **Mascot Capsule:** sphere map (hiệu ứng phản chiếu). Primitive dạng điểm và đường chưa được vẽ.
+- **Mascot Capsule và API hãng chưa thử với game thật:** mới chạy với dữ liệu tự sinh. Định dạng MBAC/MTRA không có tài liệu chính thức, nên có thể còn sai ở model thật. Nếu gặp lỗi, gửi kèm file game cho tôi.
+- **Thiếu hẳn:** Sony Ericsson (ngoài Mascot Capsule), Motorola `com.motorola.game.*`, LG `mmpp.phone`, `MathFP`.
 
 ## Khi test, gửi lại cho tôi
 

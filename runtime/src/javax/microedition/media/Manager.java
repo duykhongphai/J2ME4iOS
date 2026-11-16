@@ -54,12 +54,30 @@ public final class Manager {
         if (n.endsWith(".wav")) return "audio/x-wav";
         if (n.endsWith(".mp3")) return "audio/mpeg";
         if (n.endsWith(".amr")) return "audio/amr";
+        if (n.endsWith(".jts")) return "audio/x-tone-seq";
+        if (n.endsWith(".mmf")) return "application/vnd.smaf";
+        if (n.endsWith(".ott")) return "audio/x-ott";
         return "application/octet-stream";
+    }
+
+    public static Player createPlayer(javax.microedition.media.protocol.DataSource source) throws IOException, MediaException {
+        if (source == null) throw new IllegalArgumentException();
+        source.connect();
+        javax.microedition.media.protocol.SourceStream[] ss = source.getStreams();
+        if (ss == null || ss.length == 0) throw new MediaException("No streams");
+        ByteArrayOutputStream bo = new ByteArrayOutputStream(8192);
+        byte[] buf = new byte[4096];
+        int n;
+        while ((n = ss[0].read(buf, 0, buf.length)) > 0) bo.write(buf, 0, n);
+        byte[] data = bo.toByteArray();
+        String type = source.getContentType();
+        return new PlayerImpl(data, type != null ? type : guessType(source.getLocator() == null ? "" : source.getLocator(), data));
     }
 
     public static void playTone(int note, int duration, int volume) throws MediaException {
         if (note < 0 || note > 127 || duration <= 0) throw new IllegalArgumentException();
-        j4i.Sys.tone(note, duration, Math.max(0, Math.min(100, volume)));
+        int v = Math.max(0, Math.min(100, volume));
+        j4i.Tones.playOnce(j4i.Tones.wav(new int[] {j4i.Tones.noteHz(note)}, new int[] {Math.min(duration, 30000)}, new int[] {100}, 1), v);
     }
 
     public static TimeBase getSystemTimeBase() { return SYSTEM_TB; }

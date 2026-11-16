@@ -109,21 +109,29 @@ static void host_exited(void *u, int code) {
 
 /* ---------------- controller ---------------- */
 @implementation GameViewController {
-    NSString *_jar;
+    NSString *_jar, *_file;
     int _w, _h;
     J4IScreenView *_screen;
     KeypadView *_keypad;
+    UIButton *_menuButton;
     NSThread *_vm;
     BOOL _started, _exiting;
     CGColorSpaceRef _rgb;
+    NSString *_orient, *_scale;
+    BOOL _smooth, _showKeypad;
 }
 
 - (instancetype)initWithJarPath:(NSString *)path width:(int)w height:(int)h {
     if ((self = [super initWithNibName:nil bundle:nil])) {
         _jar = path;
+        _file = path.lastPathComponent;
         _w = w;
         _h = h;
         _rgb = CGColorSpaceCreateDeviceRGB();
+        _orient = J4IGameSetting(_file, @"orient", @"auto");
+        _scale = J4IGameSetting(_file, @"scale", @"fit");
+        _smooth = [J4IGameSetting(_file, @"smooth", @"0") isEqualToString:@"1"];
+        _showKeypad = ![J4IGameSetting(_file, @"keypad", @"1") isEqualToString:@"0"];
     }
     return self;
 }
@@ -137,6 +145,18 @@ static void host_exited(void *u, int code) {
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }
 - (BOOL)canBecomeFirstResponder { return YES; }
+- (BOOL)shouldAutorotate { return YES; }
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    if ([_orient isEqualToString:@"portrait"]) return UIInterfaceOrientationMaskPortrait;
+    if ([_orient isEqualToString:@"landscape"]) return UIInterfaceOrientationMaskLandscape;
+    return UIInterfaceOrientationMaskAllButUpsideDown;
+}
+
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
+    if ([_orient isEqualToString:@"landscape"]) return UIInterfaceOrientationLandscapeRight;
+    return UIInterfaceOrientationPortrait;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -152,42 +172,66 @@ static void host_exited(void *u, int code) {
     _screen.vmWidth = _w;
     _screen.vmHeight = _h;
     [self.view addSubview:_screen];
+    [self applyFilter];
+
+    _menuButton = [UIButton buttonWithType:UIButtonTypeCustom];
+    [_menuButton setTitle:@"☰" forState:UIControlStateNormal];
+    [_menuButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    _menuButton.titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    _menuButton.backgroundColor = [UIColor colorWithWhite:0.15 alpha:0.55];
+    _menuButton.layer.cornerRadius = 8;
+    [_menuButton addTarget:self action:@selector(menuButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:_menuButton];
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserver:self selector:@selector(appBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [nc addObserver:self selector:@selector(appForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
 }
 
+- (void)menuButtonTapped:(UIButton *)b {
+    [self showMenu:b];
+}
+
+- (void)applyFilter {
+    _screen.layer.magnificationFilter = _smooth ? kCAFilterLinear : kCAFilterNearest;
+    _screen.layer.minificationFilter = _smooth ? kCAFilterLinear : kCAFilterNearest;
+}
+
+/* Places a fw x fh frame inside `area` according to the scale mode. */
+- (CGRect)fitWidth:(int)fw height:(int)fh inRect:(CGRect)area topAligned:(BOOL)top {
+    if (fw <= 0 || fh <= 0 || area.size.width <= 0 || area.size.height <= 0) return area;
+    if ([_scale isEqualToString:@"stretch"]) return area;
+    CGFloat s = MIN(area.size.width / fw, area.size.height / fh);
+    if ([_scale isEqualToString:@"integer"] && s >= 1) s = floor(s);
+    CGFloat sw = fw * s, sh = fh * s;
+    CGFloat x = area.origin.x + (area.size.width - sw) / 2;
+    CGFloat y = top ? area.origin.y : area.origin.y + (area.size.height - sh) / 2;
+    return CGRectMake(x, y, sw, sh);
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGRect safe = UIEdgeInsetsInsetRect(self.view.bounds, self.view.safeAreaInsets);
     BOOL landscape = safe.size.width > safe.size.height;
+    int fw = _screen.vmWidth > 0 ? _screen.vmWidth : _w;
+    int fh = _screen.vmHeight > 0 ? _screen.vmHeight : _h;
+    _keypad.hidden = !_showKeypad;
+    _menuButton.hidden = _showKeypad;
     _keypad.landscape = landscape;
-    if (!landscape) {
-        CGFloat sw = safe.size.width;
-        CGFloat sh = sw * _h / _w;
-        CGFloat maxH = safe.size.height * 0.58;
-        if (sh > maxH) {
-            sh = maxH;
-            sw = sh * _w / _h;
-        }
-        /* integer scaling looks sharper when it fits */
-        CGFloat scale = floor(sw / _w);
-        if (scale >= 1 && scale * _w >= sw * 0.85) {
-            sw = scale * _w;
-            sh = scale * _h;
-        }
-        _screen.frame = CGRectMake(safe.origin.x + (safe.size.width - sw) / 2, safe.origin.y, sw, sh);
+    if (!_showKeypad) {
+        _screen.frame = [self fitWidth:fw height:fh inRect:safe topAligned:NO];
+        CGFloat bs = 36;
+        _menuButton.frame = CGRectMake(CGRectGetMaxX(safe) - bs - 4, safe.origin.y + 4, bs, bs);
+        [self.view bringSubviewToFront:_menuButton];
+    } else if (!landscape) {
+        CGRect area = CGRectMake(safe.origin.x, safe.origin.y, safe.size.width, safe.size.height * 0.58);
+        _screen.frame = [self fitWidth:fw height:fh inRect:area topAligned:YES];
         _keypad.frame = CGRectMake(safe.origin.x, CGRectGetMaxY(_screen.frame), safe.size.width,
                                    CGRectGetMaxY(safe) - CGRectGetMaxY(_screen.frame));
     } else {
-        CGFloat sh = safe.size.height;
-        CGFloat sw = sh * _w / _h;
-        if (sw > safe.size.width * 0.6) {
-            sw = safe.size.width * 0.6;
-            sh = sw * _h / _w;
-        }
-        _screen.frame = CGRectMake(safe.origin.x + (safe.size.width - sw) / 2, safe.origin.y + (safe.size.height - sh) / 2, sw, sh);
+        CGFloat aw = safe.size.width * 0.6;
+        CGRect area = CGRectMake(safe.origin.x + (safe.size.width - aw) / 2, safe.origin.y, aw, safe.size.height);
+        _screen.frame = [self fitWidth:fw height:fh inRect:area topAligned:NO];
         _keypad.frame = safe;
         _keypad.screenGap = [self.view convertRect:_screen.frame toView:_keypad];
     }
@@ -246,6 +290,11 @@ static void host_exited(void *u, int code) {
     }
     CFDataRef data = CFDataCreate(NULL, (const UInt8 *)gFb, (CFIndex)w * h * 4);
     os_unfair_lock_unlock(&gFbLock);
+    if (w != _screen.vmWidth || h != _screen.vmHeight) { /* the game changed its frame size */
+        _screen.vmWidth = w;
+        _screen.vmHeight = h;
+        [self.view setNeedsLayout];
+    }
     CGDataProviderRef prov = CGDataProviderCreateWithCFData(data);
     CGImageRef img = CGImageCreate(w, h, 8, 32, (size_t)w * 4, _rgb, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, prov, NULL,
                                    false, kCGRenderingIntentDefault);
@@ -261,6 +310,16 @@ static void host_exited(void *u, int code) {
 - (void)showMenu:(UIView *)src {
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:nil message:nil preferredStyle:UIAlertControllerStyleActionSheet];
     __weak GameViewController *weakSelf = self;
+    [ac addAction:[UIAlertAction actionWithTitle:_showKeypad ? @"Ẩn bàn phím ảo" : @"Hiện bàn phím ảo"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf toggleKeypad]; }]];
+    NSString *scaleName = [_scale isEqualToString:@"integer"] ? @"Số nguyên" : ([_scale isEqualToString:@"stretch"] ? @"Kéo giãn" : @"Vừa khung");
+    [ac addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"Kiểu phóng to: %@", scaleName]
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf cycleScale]; }]];
+    [ac addAction:[UIAlertAction actionWithTitle:_smooth ? @"Tắt làm mịn ảnh" : @"Bật làm mịn ảnh"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *a) { [weakSelf toggleSmooth]; }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"Thoát game"
                                            style:UIAlertActionStyleDestructive
                                          handler:^(UIAlertAction *a) { [weakSelf requestExit]; }]];
@@ -268,6 +327,26 @@ static void host_exited(void *u, int code) {
     ac.popoverPresentationController.sourceView = src;
     ac.popoverPresentationController.sourceRect = src.bounds;
     [self presentViewController:ac animated:YES completion:nil];
+}
+
+- (void)toggleKeypad {
+    _showKeypad = !_showKeypad;
+    J4ISetGameSetting(_file, @"keypad", _showKeypad ? @"1" : @"0");
+    [self.view setNeedsLayout];
+}
+
+- (void)cycleScale {
+    if ([_scale isEqualToString:@"fit"]) _scale = @"integer";
+    else if ([_scale isEqualToString:@"integer"]) _scale = @"stretch";
+    else _scale = @"fit";
+    J4ISetGameSetting(_file, @"scale", _scale);
+    [self.view setNeedsLayout];
+}
+
+- (void)toggleSmooth {
+    _smooth = !_smooth;
+    J4ISetGameSetting(_file, @"smooth", _smooth ? @"1" : @"0");
+    [self applyFilter];
 }
 
 - (void)requestExit {

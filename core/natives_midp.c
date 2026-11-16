@@ -228,6 +228,7 @@ NATIVE(Sys_audioIsPlaying) {
 NATIVE(Sys_tone) { (void)t; (void)ret; if (vm.cfg.host.tone) vm.cfg.host.tone(vm.cfg.host.user, a[0].i, a[1].i, a[2].i); }
 
 void midp_free(void) {
+    net_shutdown_all();
     os_lock();
     while (text_results) {
         TextResult *r = text_results;
@@ -262,4 +263,6 @@ void natives_midp_register(void) {
     R("tone", "(III)V", Sys_tone);
 #undef R
     gfx_register();
+    natives_io_register();
+    m3g_register();
 }
